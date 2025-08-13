@@ -4,7 +4,7 @@
 use tauri::{
     menu::{MenuBuilder, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder},
-    Manager, PhysicalPosition
+    Manager
 };
 
 // 引入模块
@@ -18,13 +18,13 @@ use commands::*;
 fn main() {
     // 初始化日志
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::Info)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     tauri::Builder::default()
         .setup(|app| {
             // 初始化数据库
-            let app_handle = app.handle();
+            let _app_handle = app.handle();
             tauri::async_runtime::block_on(async {
                 if let Err(e) = database::init_database().await {
                     eprintln!("Failed to initialize database: {}", e);
@@ -32,9 +32,9 @@ fn main() {
             });
 
             // 设置系统托盘
-            let show_item = MenuItem::with_id(app, "show", "显示", true, None::<&str>);
-            let hide_item = MenuItem::with_id(app, "hide", "隐藏", true, None::<&str>);
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>);
+            let show_item = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;
+            let hide_item = MenuItem::with_id(app, "hide", "隐藏", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             
             let menu = MenuBuilder::new(app)
                 .item(&show_item)
@@ -67,18 +67,16 @@ fn main() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    match event {
-                        tauri::tray::TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } => {
-                            if let Some(window) = tray.app_handle().get_window("main") {
-                                window.show().unwrap();
-                                window.set_focus().unwrap();
-                            }
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = tray.app_handle().get_window("main") {
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
                         }
-                        _ => {}
                     }
                 })
                 .build(app)?;

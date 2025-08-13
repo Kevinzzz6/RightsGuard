@@ -8,28 +8,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useTauri } from "@/hooks/use-tauri";
 import { FileText, Link, Plus, Calendar, ExternalLink, Copy, Play, Square } from "lucide-react";
+import type { Case, AutomationStatus, IpAsset } from "@/lib/tauri-api";
 
 export function DashboardPage() {
   const { tauriAPI, isTauri, isReady } = useTauri();
   const [infringingUrl, setInfringingUrl] = useState("");
   const [originalUrl, setOriginalUrl] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [cases, setCases] = useState<any[]>([]);
-  const [automationStatus, setAutomationStatus] = useState<any>(null);
-  const [ipAssets, setIpAssets] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (isReady) {
-      loadData();
-      // 如果在Tauri环境中，定期检查自动化状态
-      if (isTauri) {
-        const interval = setInterval(checkAutomationStatus, 1000);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [isReady, isTauri]);
+  const [cases, setCases] = useState<Case[]>([]);
+  const [automationStatus, setAutomationStatus] = useState<AutomationStatus | null>(null);
+  const [ipAssets, setIpAssets] = useState<IpAsset[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const [casesData, ipAssetsData] = await Promise.all([
         tauriAPI.getCases(),
@@ -39,9 +31,12 @@ export function DashboardPage() {
       setIpAssets(ipAssetsData);
     } catch (error) {
       console.error('Failed to load data:', error);
+      tauriAPI.showMessage("错误", "加载数据失败");
+    } finally {
+      setLoading(false);
     }
   };
-
+  
   const checkAutomationStatus = async () => {
     try {
       const status = await tauriAPI.getAutomationStatus();
@@ -51,18 +46,33 @@ export function DashboardPage() {
     }
   };
 
+  useEffect(() => {
+    if (isReady) {
+      loadData();
+      if (isTauri) {
+        const interval = setInterval(checkAutomationStatus, 1000);
+        return () => clearInterval(interval);
+      }
+    }
+  }, [isReady, isTauri]);
+
   const handleSubmit = async () => {
     if (!infringingUrl) {
       await tauriAPI.showMessage("提示", "请输入侵权作品URL");
       return;
     }
     
+    if (ipAssets.length === 0) {
+      await tauriAPI.showMessage("提示", "请先在“IP资产库”中添加至少一个IP资产");
+      return;
+    }
+
     setIsSubmitting(true);
     
     try {
       // 在实际应用中，这里应该让用户选择IP资产
       // 暂时使用第一个IP资产
-      const selectedIpAsset = ipAssets.length > 0 ? ipAssets[0] : null;
+      const selectedIpAsset = ipAssets[0];
       
       await tauriAPI.startAutomation(
         infringingUrl,
@@ -70,16 +80,16 @@ export function DashboardPage() {
         selectedIpAsset?.id
       );
       
-      // 清空表单
       setInfringingUrl("");
       setOriginalUrl("");
       
-      // 重新加载数据
-      await loadData();
+      // 延迟一小段时间再刷新，等待后端状态更新
+      setTimeout(loadData, 1000);
       
     } catch (error) {
       console.error('Failed to start automation:', error);
-      await tauriAPI.showMessage("错误", "启动自动化流程失败");
+      const errorMessage = error instanceof Error ? error.message : "启动自动化流程失败";
+      await tauriAPI.showMessage("错误", errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -111,7 +121,7 @@ export function DashboardPage() {
     }
   };
 
-  if (!isReady) {
+  if (!isReady || loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -136,7 +146,6 @@ export function DashboardPage() {
         )}
       </div>
 
-      {/* 自动化状态显示 */}
       {automationStatus?.isRunning && (
         <Card className="mb-6 border-orange-200 bg-orange-50">
           <CardHeader>
@@ -149,9 +158,9 @@ export function DashboardPage() {
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-orange-700">当前步骤：</span>
-                <span className="text-sm font-medium">{automationStatus.currentStep}</span>
+                <span className="text-sm font-medium">{automationStatus.currentStep || '...'}</span>
               </div>
-              {automationStatus.progress !== undefined && (
+              {automationStatus.progress !== undefined && automationStatus.progress !== null && (
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-orange-700">进度：</span>
                   <span className="text-sm font-medium">{automationStatus.progress.toFixed(0)}%</span>
@@ -254,7 +263,7 @@ export function DashboardPage() {
                       {caseItem.status}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
-                      {new Date(caseItem.submissionDate || caseItem.createdAt).toLocaleDateString()}
+                      {new Date(caseItem.submissionDate || caseItem.createdAt!).toLocaleDateString()}
                     </span>
                   </div>
                   
@@ -336,7 +345,7 @@ export function DashboardPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {new Date(caseItem.submissionDate || caseItem.createdAt).toLocaleDateString()}
+                      {new Date(caseItem.submissionDate || caseItem.createdAt!).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <Badge variant={caseItem.status === "已提交" ? "default" : "secondary"}>

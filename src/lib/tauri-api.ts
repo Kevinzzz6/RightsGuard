@@ -87,7 +87,7 @@ class TauriAPI {
     }
   }
 
-  async saveProfile(profile: Omit<Profile, 'id' | 'createdAt' | 'updatedAt'>): Promise<Profile> {
+  async saveProfile(profile: Omit<Profile, 'createdAt' | 'updatedAt'>): Promise<Profile> {
     if (!this.isTauri) {
       // Mock save for web environment
       alert('个人档案已保存！');
@@ -170,7 +170,7 @@ class TauriAPI {
     }
   }
 
-  async saveIpAsset(asset: Omit<IpAsset, 'id' | 'createdAt' | 'updatedAt'>): Promise<IpAsset> {
+  async saveIpAsset(asset: Omit<IpAsset, 'createdAt' | 'updatedAt'>): Promise<IpAsset> {
     if (!this.isTauri) {
       // Mock save for web environment
       alert('IP资产已保存！');

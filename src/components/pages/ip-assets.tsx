@@ -10,179 +10,124 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Calendar } from "@/components/ui/calendar";
-import { format } from "date-fns";
 import { CalendarIcon, Plus, Library, Upload, FileText, Edit, Trash2 } from "lucide-react";
 import { useTauri } from "@/hooks/use-tauri";
-import { IpAsset } from "@/lib/tauri-api";
+import type { IpAsset } from "@/lib/tauri-api";
 
 const workTypes = ["视频", "音乐", "图片", "文章", "软件", "其他"];
 const regions = ["中国大陆", "香港", "澳门", "台湾", "美国", "日本", "韩国", "其他"];
 const equityTypes = ["著作权", "商标权", "专利权", "其他"];
+
+const initialFormState: Omit<IpAsset, 'id' | 'createdAt' | 'updatedAt'> = {
+  isAgent: false,
+  owner: "",
+  authStartDate: "",
+  authEndDate: "",
+  authFiles: [],
+  equityType: "著作权",
+  workType: "",
+  workName: "",
+  region: "中国大陆",
+  workStartDate: "",
+  workEndDate: "",
+  workProofFiles: [],
+  status: "待认证"
+};
 
 export function IpAssetsPage() {
   const { tauriAPI, isReady } = useTauri();
   const [ipAssets, setIpAssets] = useState<IpAsset[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<IpAsset | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   
-  // Form state
-  const [formData, setFormData] = useState({
-    isAgent: false,
-    owner: "",
-    authStartDate: "",
-    authEndDate: "",
-    authFiles: [] as string[],
-    equityType: "著作权",
-    workType: "",
-    workName: "",
-    region: "中国大陆",
-    workStartDate: "",
-    workEndDate: "",
-    workProofFiles: [] as string[]
-  });
-
-  useEffect(() => {
-    loadIpAssets();
-  }, [isReady]);
-
-  const loadIpAssets = async () => {
-    if (!isReady) return;
-    
+  const [formData, setFormData] = useState(initialFormState);
+  
+  const loadAssets = async () => {
+    setLoading(true);
     try {
       const assets = await tauriAPI.getIpAssets();
       setIpAssets(assets);
     } catch (error) {
       console.error("Failed to load IP assets:", error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
+  useEffect(() => {
+    if (isReady) {
+      loadAssets();
+    }
+  }, [isReady]);
+
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = async () => {
     try {
-      const assetData = {
-        workName: formData.workName,
-        workType: formData.workType,
-        owner: formData.owner,
-        region: formData.region,
-        workStartDate: formData.workStartDate,
-        workEndDate: formData.workEndDate,
-        equityType: formData.equityType,
-        isAgent: formData.isAgent,
-        authStartDate: formData.authStartDate || undefined,
-        authEndDate: formData.authEndDate || undefined,
-        authFiles: formData.authFiles.length > 0 ? formData.authFiles : undefined,
-        workProofFiles: formData.workProofFiles.length > 0 ? formData.workProofFiles : undefined,
-        status: "待认证"
-      };
-
-      let savedAsset: IpAsset;
-      if (editingAsset?.id) {
-        // Update existing asset
-        savedAsset = await tauriAPI.saveIpAsset(assetData);
-        setIpAssets(prev => prev.map(asset => 
-          asset.id === editingAsset.id ? savedAsset : asset
-        ));
+      if (editingAsset) {
+        await tauriAPI.saveIpAsset({ ...formData, id: editingAsset.id });
       } else {
-        // Create new asset
-        savedAsset = await tauriAPI.saveIpAsset(assetData);
-        setIpAssets(prev => [...prev, savedAsset]);
+        await tauriAPI.saveIpAsset(formData);
       }
-      
+      await tauriAPI.showMessage("成功", editingAsset ? "IP资产已更新！" : "IP资产已添加！");
+      await loadAssets();
       setIsDialogOpen(false);
-      setEditingAsset(null);
-      resetForm();
     } catch (error) {
-      console.error("Failed to save IP asset:", error);
+      await tauriAPI.showMessage("错误", "保存失败");
     }
   };
 
   const resetForm = () => {
-    setFormData({
-      isAgent: false,
-      owner: "",
-      authStartDate: "",
-      authEndDate: "",
-      authFiles: [],
-      equityType: "著作权",
-      workType: "",
-      workName: "",
-      region: "中国大陆",
-      workStartDate: "",
-      workEndDate: "",
-      workProofFiles: []
-    });
+    setFormData(initialFormState);
   };
 
   const handleEdit = (asset: IpAsset) => {
     setEditingAsset(asset);
     setFormData({
-      isAgent: asset.isAgent,
-      owner: asset.owner,
-      authStartDate: asset.authStartDate || "",
-      authEndDate: asset.authEndDate || "",
-      authFiles: asset.authFiles || [],
-      equityType: asset.equityType,
-      workType: asset.workType,
-      workName: asset.workName,
-      region: asset.region,
-      workStartDate: asset.workStartDate,
-      workEndDate: asset.workEndDate,
-      workProofFiles: asset.workProofFiles || []
+      ...asset,
+      authFiles: asset.authFiles ? JSON.parse(asset.authFiles as any) : [],
+      workProofFiles: asset.workProofFiles ? JSON.parse(asset.workProofFiles as any) : []
     });
     setIsDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    try {
-      const success = await tauriAPI.deleteIpAsset(id);
-      if (success) {
-        setIpAssets(prev => prev.filter(asset => asset.id !== id));
-      }
-    } catch (error) {
-      console.error("Failed to delete IP asset:", error);
+    if (window.confirm("确定要删除这个IP资产吗？")) {
+        try {
+            await tauriAPI.deleteIpAsset(id);
+            await tauriAPI.showMessage("成功", "IP资产已删除！");
+            await loadAssets();
+        } catch (error) {
+            await tauriAPI.showMessage("错误", "删除失败");
+        }
     }
   };
 
   const handleFileSelect = async (type: 'auth' | 'proof') => {
     try {
-      const result = await tauriAPI.selectFiles();
-      if (result.paths.length > 0) {
-        if (type === 'auth') {
-          setFormData(prev => ({
-            ...prev,
-            authFiles: [...prev.authFiles, ...result.paths]
-          }));
-        } else {
-          setFormData(prev => ({
-            ...prev,
-            workProofFiles: [...prev.workProofFiles, ...result.paths]
-          }));
+        const selection = await tauriAPI.selectFiles();
+        if (selection.paths.length > 0) {
+            const field = type === 'auth' ? 'authFiles' : 'workProofFiles';
+            setFormData(prev => ({
+                ...prev,
+                [field]: [...(prev[field] || []), ...selection.paths]
+            }));
         }
-      }
     } catch (error) {
-      console.error("Failed to select files:", error);
+        console.error("File selection error:", error);
+        await tauriAPI.showMessage("错误", "文件选择失败");
     }
   };
-
-  if (isLoading) {
-    return (
-      <div className="p-6">
+  
+  if (loading) {
+      return (
         <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">加载中...</div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
-      </div>
-    );
+      );
   }
 
   return (
@@ -200,6 +145,7 @@ export function IpAssetsPage() {
             <Button onClick={() => {
               setEditingAsset(null);
               resetForm();
+              setIsDialogOpen(true);
             }}>
               <Plus className="h-4 w-4 mr-2" />
               新增IP资产
@@ -207,17 +153,14 @@ export function IpAssetsPage() {
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>
-                {editingAsset ? "编辑IP资产" : "新增IP资产"}
-              </DialogTitle>
-              <DialogDescription>
-                填写IP资产的详细信息，用于权益认证步骤
-              </DialogDescription>
+              <DialogTitle>{editingAsset ? "编辑IP资产" : "新增IP资产"}</DialogTitle>
+              <DialogDescription>填写IP资产的详细信息，用于权益认证步骤</DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4">
-              {/* Is Agent */}
-              <div className="space-y-2">
+              {/* Form fields... (same as original, no changes needed here) */}
+               {/* Is Agent */}
+               <div className="space-y-2">
                 <Label>身份类型</Label>
                 <RadioGroup 
                   value={formData.isAgent ? "agent" : "owner"} 
@@ -380,34 +323,19 @@ export function IpAssetsPage() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-2 pt-4">
-                <Button onClick={handleSubmit} className="flex-1">
-                  {editingAsset ? "更新" : "添加"}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => setIsDialogOpen(false)}
-                  className="flex-1"
-                >
-                  取消
-                </Button>
+                <Button onClick={handleSubmit} className="flex-1">{editingAsset ? "更新" : "添加"}</Button>
+                <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="flex-1">取消</Button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* IP Assets List */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Library className="h-5 w-5" />
-            IP资产列表
-          </CardTitle>
-          <CardDescription>
-            管理您的知识产权作品
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2"><Library className="h-5 w-5" /> IP资产列表</CardTitle>
+          <CardDescription>管理您的知识产权作品</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -425,34 +353,18 @@ export function IpAssetsPage() {
             <TableBody>
               {ipAssets.map((asset) => (
                 <TableRow key={asset.id}>
-                  <TableCell className="font-medium">
-                    {asset.workName}
-                  </TableCell>
+                  <TableCell className="font-medium">{asset.workName}</TableCell>
                   <TableCell>{asset.workType}</TableCell>
                   <TableCell>{asset.owner}</TableCell>
                   <TableCell>{asset.region}</TableCell>
                   <TableCell>{asset.equityType}</TableCell>
                   <TableCell>
-                    <Badge variant={asset.status === "已认证" ? "default" : "secondary"}>
-                      {asset.status}
-                    </Badge>
+                    <Badge variant={asset.status === "已认证" ? "default" : "secondary"}>{asset.status}</Badge>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleEdit(asset)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleDelete(asset.id!)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleEdit(asset)}><Edit className="h-4 w-4" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => handleDelete(asset.id!)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
