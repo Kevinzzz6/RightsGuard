@@ -50,13 +50,13 @@ fn main() {
                 .on_menu_event(move |app, event| {
                     match event.id().as_ref() {
                         "show" => {
-                            if let Some(window) = app.get_window("main") {
+                            if let Some(window) = app.get_webview_window("main") {
                                 window.show().unwrap();
                                 window.set_focus().unwrap();
                             }
                         }
                         "hide" => {
-                            if let Some(window) = app.get_window("main") {
+                            if let Some(window) = app.get_webview_window("main") {
                                 window.hide().unwrap();
                             }
                         }
@@ -73,7 +73,7 @@ fn main() {
                         ..
                     } = event
                     {
-                        if let Some(window) = tray.app_handle().get_window("main") {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
                             window.show().unwrap();
                             window.set_focus().unwrap();
                         }

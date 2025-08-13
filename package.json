@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:tauri": "npm run build && cd src-tauri && cargo build --release",
-    "dev:tauri": "cd src-tauri && cargo run",
+    "build:tauri": "npm run build && npx tauri build",
+    "dev:tauri": "npx tauri dev",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",
@@ -51,7 +51,7 @@
     "@reactuses/core": "^6.0.5",
     "@tanstack/react-query": "^5.82.0",
     "@tanstack/react-table": "^8.21.3",
-    "@tauri-apps/api": "^1.5.3",
+    "@tauri-apps/api": "^2.1.0",
     "axios": "^1.10.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -86,6 +86,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.7.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

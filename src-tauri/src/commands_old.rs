@@ -1,4 +1,5 @@
-use serde::Serialize;
+use tauri::{AppHandle, Manager};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::database;
 use crate::automation;
@@ -65,8 +66,7 @@ pub async fn save_ip_asset(asset: IpAsset) -> Result<IpAsset, CommandError> {
 #[tauri::command]
 pub async fn delete_ip_asset(id: String) -> Result<bool, CommandError> {
     let uuid = Uuid::parse_str(&id)?;
-    database::delete_ip_asset(uuid).await?;
-    Ok(true)
+    Ok(database::delete_ip_asset(uuid).await?)
 }
 
 // 案件相关命令
@@ -83,26 +83,30 @@ pub async fn save_case(case: Case) -> Result<Case, CommandError> {
 #[tauri::command]
 pub async fn delete_case(id: String) -> Result<bool, CommandError> {
     let uuid = Uuid::parse_str(&id)?;
-    database::delete_case(uuid).await?;
-    Ok(true)
+    Ok(database::delete_case(uuid).await?)
 }
 
 // 自动化相关命令
 #[tauri::command]
-pub async fn start_automation(infringing_url: String, original_url: Option<String>, ip_asset_id: Option<String>) -> Result<(), CommandError> {
+pub async fn start_automation(
+    infringing_url: String,
+    original_url: Option<String>,
+    ip_asset_id: Option<String>,
+) -> Result<(), CommandError> {
+    let ip_asset_uuid = ip_asset_id.map(|id| Uuid::parse_str(&id)).transpose()?;
+    
     let request = AutomationRequest {
         infringing_url,
         original_url,
-        ip_asset_id: ip_asset_id.map(|id| Uuid::parse_str(&id)).transpose()?,
+        ip_asset_id: ip_asset_uuid,
     };
-    automation::start_automation(request).await?;
-    Ok(())
+    
+    Ok(automation::start_automation(request).await?)
 }
 
 #[tauri::command]
 pub async fn stop_automation() -> Result<(), CommandError> {
-    automation::stop_automation().await?;
-    Ok(())
+    Ok(automation::stop_automation().await?)
 }
 
 #[tauri::command]
@@ -110,28 +114,61 @@ pub async fn get_automation_status() -> Result<AutomationStatus, CommandError> {
     Ok(automation::get_automation_status().await?)
 }
 
-// 文件相关命令 - Simplified versions
+// 文件相关命令
 #[tauri::command]
-pub async fn select_file() -> Result<FileSelection, CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
-    Ok(FileSelection { paths: vec![] })
+pub async fn select_file(app: AppHandle) -> Result<FileSelection, CommandError> {
+    use tauri::api::dialog::FileDialogBuilder;
+    
+    let (sender, receiver) = std::sync::mpsc::channel();
+    FileDialogBuilder::new(&app).pick_file(move |path| {
+        sender.send(path).unwrap();
+    });
+
+    let path = receiver.recv().unwrap();
+
+    match path {
+        Some(p) => Ok(FileSelection {
+            paths: vec![p.to_string_lossy().to_string()],
+        }),
+        None => Ok(FileSelection { paths: vec![] }),
+    }
 }
 
 #[tauri::command]
-pub async fn select_files() -> Result<FileSelection, CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
-    Ok(FileSelection { paths: vec![] })
+pub async fn select_files(app: AppHandle) -> Result<FileSelection, CommandError> {
+    use tauri::api::dialog::FileDialogBuilder;
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    FileDialogBuilder::new(&app).pick_files(move |paths| {
+        sender.send(paths).unwrap();
+    });
+
+    let paths = receiver.recv().unwrap();
+    
+    match paths {
+        Some(p) => {
+            let path_strings: Vec<String> = p
+                .iter()
+                .map(|path| path.to_string_lossy().to_string())
+                .collect();
+            Ok(FileSelection { paths: path_strings })
+        }
+        None => Ok(FileSelection { paths: vec![] }),
+    }
 }
 
-// 系统相关命令 - Simplified versions  
+
+// 系统相关命令
 #[tauri::command]
-pub async fn open_url(_url: String) -> Result<(), CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
-    Ok(())
+pub async fn open_url(url: String) -> Result<(), CommandError> {
+    use tauri::api::shell::open;
+    open(&tauri::ShellScope::new(), &url, None).map_err(|e| CommandError::Automation(e.into()))
 }
 
 #[tauri::command]
-pub async fn show_message(_title: String, _message: String) -> Result<(), CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
+pub async fn show_message(app: AppHandle, title: String, message: String) -> Result<(), CommandError> {
+    use tauri::api::dialog::MessageDialogBuilder;
+    let window = app.get_window("main").unwrap();
+    MessageDialogBuilder::new(&title, &message).show(move |_| {});
     Ok(())
 }

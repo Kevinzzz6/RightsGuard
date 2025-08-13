@@ -1,6 +1,6 @@
-use sqlx::{SqlitePool, Row};
+use sqlx::SqlitePool;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use anyhow::Result;
 use crate::models::{Profile, IpAsset, Case};
 

@@ -57,7 +57,7 @@ class TauriAPI {
 
   constructor() {
     // 在服务器端渲染时，默认为false
-    this.isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+    this.isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   }
 
   // 检查是否在Tauri环境中
@@ -79,7 +79,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Profile>('get_profile');
     } catch (error) {
       console.error('Failed to get profile:', error);
@@ -95,7 +95,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       
       // Convert files array to JSON string
       const profileData = {
@@ -147,7 +147,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<IpAsset[]>('get_ip_assets');
     } catch (error) {
       console.error('Failed to get IP assets:', error);
@@ -162,7 +162,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<IpAsset>('get_ip_asset', { id });
     } catch (error) {
       console.error('Failed to get IP asset:', error);
@@ -178,7 +178,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       
       // Convert files arrays to JSON strings
       const assetData = {
@@ -205,7 +205,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<boolean>('delete_ip_asset', { id });
     } catch (error) {
       console.error('Failed to delete IP asset:', error);
@@ -230,7 +230,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Case[]>('get_cases');
     } catch (error) {
       console.error('Failed to get cases:', error);
@@ -246,7 +246,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Case>('save_case', { case: caseData });
     } catch (error) {
       console.error('Failed to save case:', error);
@@ -265,7 +265,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<boolean>('delete_case', { id });
     } catch (error) {
       console.error('Failed to delete case:', error);
@@ -286,7 +286,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('start_automation', {
         infringingUrl,
         originalUrl,
@@ -306,7 +306,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('stop_automation');
     } catch (error) {
       console.error('Failed to stop automation:', error);
@@ -325,7 +325,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<AutomationStatus>('get_automation_status');
     } catch (error) {
       console.error('Failed to get automation status:', error);
@@ -344,7 +344,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<FileSelection>('select_file');
     } catch (error) {
       console.error('Failed to select file:', error);
@@ -359,7 +359,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<FileSelection>('select_files');
     } catch (error) {
       console.error('Failed to select files:', error);
@@ -378,7 +378,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('open_url', { url });
     } catch (error) {
       console.error('Failed to open URL:', error);
@@ -394,7 +394,7 @@ class TauriAPI {
     }
     
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('show_message', { title, message });
     } catch (error) {
       console.error('Failed to show message:', error);
