@@ -5,57 +5,48 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { User, Upload, Save, Shield } from "lucide-react";
 import { useTauri } from "@/hooks/use-tauri";
+import type { Profile } from "@/lib/tauri-api";
 
-interface ProfileData {
-  name: string;
-  phone: string;
-  email: string;
-  idCardNumber: string;
-  idCardFiles: { name: string; path: string }[];
-}
+const initialProfileState: Profile = {
+  name: "",
+  phone: "",
+  email: "",
+  idCardNumber: "",
+  idCardFiles: []
+};
 
 export function ProfilePage() {
   const { tauriAPI, isReady } = useTauri();
-  const [profileData, setProfileData] = useState<ProfileData>({
-    name: "",
-    phone: "",
-    email: "",
-    idCardNumber: "",
-    idCardFiles: []
-  });
+  const [profileData, setProfileData] = useState<Profile>(initialProfileState);
   const [isEditing, setIsEditing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadProfile();
-  }, [isReady]);
-
-  const loadProfile = async () => {
-    if (!isReady) return;
-    
-    try {
-      const profile = await tauriAPI.getProfile();
-      if (profile) {
-        setProfileData({
-          name: profile.name,
-          phone: profile.phone,
-          email: profile.email,
-          idCardNumber: profile.idCardNumber,
-          idCardFiles: profile.idCardFiles?.map(file => ({ name: file, path: file })) || []
-        });
+    const loadProfile = async () => {
+      if (isReady) {
+        setLoading(true);
+        try {
+          const data = await tauriAPI.getProfile();
+          if (data) {
+            setProfileData({
+              ...data,
+              idCardFiles: data.idCardFiles ? JSON.parse(data.idCardFiles as any) : []
+            });
+          }
+        } catch (error) {
+          console.error("Failed to load profile:", error);
+        } finally {
+          setLoading(false);
+        }
       }
-    } catch (error) {
-      console.error("Failed to load profile:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    loadProfile();
+  }, [isReady, tauriAPI]);
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: keyof Profile, value: string) => {
     setProfileData(prev => ({
       ...prev,
       [field]: value
@@ -64,52 +55,36 @@ export function ProfilePage() {
 
   const handleSave = async () => {
     try {
-      await tauriAPI.saveProfile({
-        name: profileData.name,
-        phone: profileData.phone,
-        email: profileData.email,
-        idCardNumber: profileData.idCardNumber,
-        idCardFiles: profileData.idCardFiles.map(file => file.name)
-      });
+      await tauriAPI.saveProfile(profileData);
+      await tauriAPI.showMessage("成功", "个人档案已保存！");
       setIsEditing(false);
     } catch (error) {
       console.error("Failed to save profile:", error);
+      await tauriAPI.showMessage("错误", "保存失败");
     }
   };
 
   const handleFileSelect = async () => {
     try {
-      const result = await tauriAPI.selectFiles();
-      if (result.paths.length > 0) {
-        const newFiles = result.paths.map(path => ({
-          name: path.split('/').pop() || path,
-          path: path
-        }));
-        setProfileData(prev => ({
-          ...prev,
-          idCardFiles: [...prev.idCardFiles, ...newFiles]
-        }));
-      }
+        const selection = await tauriAPI.selectFiles();
+        if (selection.paths.length > 0) {
+            setProfileData(prev => ({
+                ...prev,
+                idCardFiles: [...(prev.idCardFiles || []), ...selection.paths]
+            }));
+        }
     } catch (error) {
-      console.error("Failed to select files:", error);
+        console.error("File selection error:", error);
+        await tauriAPI.showMessage("错误", "文件选择失败");
     }
   };
-
-  const removeFile = (index: number) => {
-    setProfileData(prev => ({
-      ...prev,
-      idCardFiles: prev.idCardFiles.filter((_, i) => i !== index)
-    }));
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-6">
+  
+  if (loading) {
+      return (
         <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">加载中...</div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
-      </div>
-    );
+      );
   }
 
   return (
@@ -132,7 +107,6 @@ export function ProfilePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Name */}
           <div className="space-y-2">
             <Label htmlFor="name">名称 *</Label>
             <Input
@@ -144,7 +118,6 @@ export function ProfilePage() {
             />
           </div>
 
-          {/* Phone */}
           <div className="space-y-2">
             <Label htmlFor="phone">手机号 *</Label>
             <Input
@@ -156,7 +129,6 @@ export function ProfilePage() {
             />
           </div>
 
-          {/* Email */}
           <div className="space-y-2">
             <Label htmlFor="email">邮箱 *</Label>
             <Input
@@ -169,7 +141,6 @@ export function ProfilePage() {
             />
           </div>
 
-          {/* ID Card Number */}
           <div className="space-y-2">
             <Label htmlFor="idCard">身份认证 *</Label>
             <Input
@@ -181,7 +152,6 @@ export function ProfilePage() {
             />
           </div>
 
-          {/* ID Card Files */}
           <div className="space-y-2">
             <Label>证件证明 *</Label>
             <div className="space-y-3">
@@ -201,26 +171,15 @@ export function ProfilePage() {
                 </Button>
               </div>
               
-              {/* Selected Files List */}
-              {profileData.idCardFiles.length > 0 && (
+              {profileData.idCardFiles && profileData.idCardFiles.length > 0 && (
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">已选择的文件：</Label>
                   <div className="space-y-1">
                     {profileData.idCardFiles.map((file, index) => (
                       <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded">
                         <Badge variant="secondary" className="text-xs">
-                          {file.name}
+                          {file.split(/[/\\]/).pop()}
                         </Badge>
-                        {isEditing && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeFile(index)}
-                            className="h-6 w-6 p-0"
-                          >
-                            ×
-                          </Button>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -229,7 +188,6 @@ export function ProfilePage() {
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="flex gap-2 pt-4">
             {isEditing ? (
               <>
@@ -257,7 +215,6 @@ export function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Info Card */}
       <Card className="max-w-2xl mt-6">
         <CardHeader>
           <CardTitle className="text-lg">使用说明</CardTitle>
