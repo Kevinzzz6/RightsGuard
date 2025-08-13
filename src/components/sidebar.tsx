@@ -108,8 +108,10 @@ export function Sidebar({ activePage, setActivePage }: SidebarProps) {
                         className="w-full justify-start"
                         onClick={() => {
                           setActivePage(item.href);
-                          // Close sheet after selection
-                          document.querySelector('[data-state="open"]')?.setAttribute('data-state', 'closed');
+                          // Close sheet after selection (client-side only)
+                          if (typeof document !== 'undefined') {
+                            document.querySelector('[data-state="open"]')?.setAttribute('data-state', 'closed');
+                          }
                         }}
                       >
                         <Icon className="mr-2 h-4 w-4" />

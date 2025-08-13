@@ -56,7 +56,7 @@ class TauriAPI {
   private isTauri: boolean;
 
   constructor() {
-    this.isTauri = window.__TAURI__ !== undefined;
+    this.isTauri = typeof window !== 'undefined' && (window as any).__TAURI__ !== undefined;
   }
 
   // 检查是否在Tauri环境中
