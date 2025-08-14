@@ -1,9 +1,8 @@
-use sqlx::{SqlitePool, Row};
+use sqlx::SqlitePool;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use anyhow::Result;
 use crate::models::{Profile, IpAsset, Case};
-use std::str::FromStr;
 
 // Database path will be initialized at runtime
 static mut DATABASE_URL: Option<String> = None;
@@ -215,10 +214,14 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
             tracing::error!("Failed to retrieve saved profile with ID: {}", profile_id);
             
             // List all profiles for debugging
-            let all_profiles = sqlx::query("SELECT id, name FROM profiles")
+            let all_profiles = sqlx::query_as::<_, (String, String)>("SELECT id, name FROM profiles")
                 .fetch_all(&pool)
                 .await?;
-            tracing::info!("All profiles in database: {:?}", all_profiles);
+            tracing::info!("All profiles in database: {}", 
+                all_profiles.iter()
+                    .map(|(id, name)| format!("ID: {}, Name: {}", id, name))
+                    .collect::<Vec<_>>()
+                    .join(", "));
             
             Err(anyhow::anyhow!("Profile was saved but could not be retrieved"))
         }
