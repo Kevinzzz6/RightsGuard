@@ -50,3 +50,8 @@ server.log
  
 # tauri build artifacts
 /src-tauri/target/
+
+# Additional lock files (keep Cargo.lock for applications)
+*.lock
+!Cargo.lock
+!package-lock.json

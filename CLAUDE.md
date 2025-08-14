@@ -26,6 +26,10 @@ RightsGuard is a desktop application for automated copyright infringement appeal
 ### Testing
 Check the project for test scripts - none are currently defined in package.json.
 
+## Memories
+- 当你需要运行npm run build:tauri的时候，请告诉我，我会新开一个终端运行并告诉你结果。
+- 更新完代码及时commit并push到github。
+
 ## Architecture
 
 ### Technology Stack
@@ -89,3 +93,48 @@ The application automatically detects its running environment:
 - File system access is controlled through Tauri's allowlist system
 - Local SQLite database for privacy (no external data transmission)
 - Secure file handling for sensitive documents (ID cards, copyright proofs)
+
+---
+
+# RightsGuard 开发进展报告
+
+## 当前状态 (2025-08-14)
+
+### ✅ 已完成的功能
+1. **Git仓库清理** - 解决了108MB+大文件推送问题，成功推送到GitHub
+2. **Tauri版本兼容性修复** - 成功回滚到工作的Tauri 2.0配置 (commit d4a808a)
+3. **文件系统集成** - 实现了Tauri 2.0原生文件对话框API
+   - 添加了 `tauri-plugin-dialog` 插件
+   - 实现了 `select_file()` 和 `select_files()` 命令
+   - 支持图片、PDF等多种文件格式过滤
+4. **系统集成功能** - 实现了URL打开和消息提示
+   - 添加了 `tauri-plugin-opener` 插件  
+   - 实现了 `open_url()` 和 `show_message()` 命令
+   - 使用回调模式确保API调用正确
+
+### 🔧 当前正在修复
+- **编译错误修复** - 更正了Tauri 2.0插件API的调用方式
+  - 修复了文件对话框的回调机制
+  - 替换了已弃用的shell插件为opener插件
+  - 修正了异步API调用模式
+
+### 🎯 下一步计划
+1. **数据持久化验证** (优先级高)
+   - 问题: 用户反馈数据在页面切换后丢失
+   - 任务: 检查前后端API调用链路和数据库保存逻辑
+2. **Bilibili自动化流程** (优先级中)  
+   - 实现真正的Playwright浏览器自动化
+   - 替换当前的placeholder实现
+3. **表单验证和错误处理** (优先级低)
+   - 身份证号、手机号、邮箱格式验证
+   - 用户友好错误提示
+
+### 🏗️ 架构改进
+- **Tauri插件系统**: 从单体API迁移到Tauri 2.0插件架构
+- **错误处理**: 统一的CommandError类型和错误传播
+- **异步模式**: 正确使用回调而非async/await处理UI对话框
+
+### 📝 技术债务
+- 需要清理未使用的导入警告
+- 需要添加更完善的错误日志
+- 可考虑添加单元测试覆盖

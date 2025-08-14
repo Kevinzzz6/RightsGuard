@@ -110,28 +110,83 @@ pub async fn get_automation_status() -> Result<AutomationStatus, CommandError> {
     Ok(automation::get_automation_status().await?)
 }
 
-// 文件相关命令 - Simplified versions
+// 文件相关命令
 #[tauri::command]
-pub async fn select_file() -> Result<FileSelection, CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
-    Ok(FileSelection { paths: vec![] })
+pub async fn select_file(app: tauri::AppHandle) -> Result<FileSelection, CommandError> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    app.dialog()
+        .file()
+        .set_title("选择文件")
+        .add_filter("图片文件", &["png", "jpg", "jpeg", "bmp", "gif"])
+        .add_filter("PDF文件", &["pdf"])
+        .add_filter("所有文件", &["*"])
+        .pick_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+    
+    let paths = match rx.recv() {
+        Ok(Some(path)) => vec![path.to_string_lossy().to_string()],
+        _ => vec![]
+    };
+    
+    Ok(FileSelection { paths })
 }
 
 #[tauri::command]
-pub async fn select_files() -> Result<FileSelection, CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
-    Ok(FileSelection { paths: vec![] })
+pub async fn select_files(app: tauri::AppHandle) -> Result<FileSelection, CommandError> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    app.dialog()
+        .file()
+        .set_title("选择文件")
+        .add_filter("图片文件", &["png", "jpg", "jpeg", "bmp", "gif"])
+        .add_filter("PDF文件", &["pdf"])
+        .add_filter("所有文件", &["*"])
+        .pick_files(move |file_paths| {
+            let _ = tx.send(file_paths);
+        });
+    
+    let paths = match rx.recv() {
+        Ok(Some(paths)) => paths.into_iter().map(|path| path.to_string_lossy().to_string()).collect(),
+        _ => vec![]
+    };
+    
+    Ok(FileSelection { paths })
 }
 
-// 系统相关命令 - Simplified versions  
+// 系统相关命令
 #[tauri::command]
-pub async fn open_url(_url: String) -> Result<(), CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
+pub async fn open_url(url: String, app: tauri::AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    
+    app.opener()
+        .open_url(url, None::<String>)
+        .map_err(|e| CommandError::Automation(format!("Failed to open URL: {}", e)))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn show_message(_title: String, _message: String) -> Result<(), CommandError> {
-    // Mock implementation for Tauri 2.0 - will need proper implementation later
+pub async fn show_message(title: String, message: String, app: tauri::AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Info)
+        .show(move |_| {
+            let _ = tx.send(());
+        });
+    
+    let _ = rx.recv(); // Wait for dialog to close
     Ok(())
 }
