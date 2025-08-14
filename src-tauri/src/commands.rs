@@ -42,7 +42,7 @@ pub async fn get_profile() -> Result<Option<Profile>, CommandError> {
 
 #[tauri::command]
 pub async fn save_profile(profile: Profile) -> Result<Profile, CommandError> {
-    tracing::info!("Attempting to save profile: {:?}", profile.name);
+    tracing::info!("Attempting to save profile: {}", profile.name);
     
     match database::save_profile(&profile).await {
         Ok(saved_profile) => {
@@ -50,7 +50,7 @@ pub async fn save_profile(profile: Profile) -> Result<Profile, CommandError> {
             Ok(saved_profile)
         }
         Err(e) => {
-            tracing::error!("Failed to save profile: {:?}", e);
+            tracing::error!("Failed to save profile: {}", e);
             Err(CommandError::Database(e.to_string()))
         }
     }

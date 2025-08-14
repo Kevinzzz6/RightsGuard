@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use chrono::Utc;
 use crate::models::{AutomationRequest, AutomationStatus};
 use once_cell::sync::Lazy;
 
@@ -25,7 +26,7 @@ pub async fn start_automation(request: AutomationRequest) -> Result<()> {
         current_step: Some("初始化".to_string()),
         progress: Some(0.0),
         error: None,
-        started_at: Some(chrono::Utc::now()),
+        started_at: Some(Utc::now()),
     };
     
     drop(status);

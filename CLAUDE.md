@@ -29,6 +29,7 @@ Check the project for test scripts - none are currently defined in package.json.
 ## Memories
 - 当你需要运行npm run build:tauri的时候，请告诉我，我会新开一个终端运行并告诉你结果。
 - 更新完代码及时commit。
+- 对于类似npm run build:tauri的构建命令，请让我来运行
 
 ## Architecture
 

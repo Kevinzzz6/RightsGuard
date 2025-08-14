@@ -240,7 +240,7 @@ export function ProfilePage() {
                 </Button>
               </div>
               
-              {profileData.idCardFiles && profileData.idCardFiles.length > 0 && (
+              {profileData.idCardFiles && Array.isArray(profileData.idCardFiles) && profileData.idCardFiles.length > 0 && (
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">已选择的文件：</Label>
                   <div className="space-y-1">

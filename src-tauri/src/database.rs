@@ -141,8 +141,8 @@ pub async fn get_profile() -> Result<Option<Profile>> {
 }
 
 pub async fn save_profile(profile: &Profile) -> Result<Profile> {
-    tracing::info!("Starting save_profile for: {:?}", profile.name);
-    tracing::debug!("Full profile data: {:?}", profile);
+    tracing::info!("Starting save_profile for: {}", profile.name);
+    tracing::debug!("Profile data - name: {}, email: {}, phone: {}", profile.name, profile.email, profile.phone);
     
     let pool = get_pool().await.map_err(|e| {
         tracing::error!("Failed to get database pool: {:?}", e);
@@ -152,7 +152,7 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
     let now = Utc::now();
     let profile_id = profile.id.unwrap_or_else(Uuid::new_v4);
     
-    tracing::info!("Using profile ID: {:?}", profile_id);
+    tracing::info!("Using profile ID: {}", profile_id);
     tracing::info!("Timestamp: {}", now.to_rfc3339());
     
     // First check if profile exists
@@ -207,7 +207,7 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
         
     match saved_profile {
         Some(profile) => {
-            tracing::info!("Profile retrieved successfully: {:?} (ID: {:?})", profile.name, profile.id);
+            tracing::info!("Profile retrieved successfully: {} (ID: {:?})", profile.name, profile.id);
             Ok(profile)
         }
         None => {
