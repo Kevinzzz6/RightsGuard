@@ -1,11 +1,33 @@
 use sqlx::SqlitePool;
 use uuid::Uuid;
 use chrono::Utc;
-use anyhow::Result;
+use anyhow::{Result, Context};
 use crate::models::{Profile, IpAsset, Case};
+use std::path::PathBuf;
+use std::fs;
 
 // Database path will be initialized at runtime
 static mut DATABASE_URL: Option<String> = None;
+
+fn get_database_path() -> Result<PathBuf> {
+    // Get the current executable directory for development
+    // In a real Tauri app, you'd use app.path().app_data_dir()
+    let mut db_path = std::env::current_dir()
+        .context("Failed to get current directory")?;
+    
+    // Create a data directory if it doesn't exist
+    db_path.push("data");
+    if !db_path.exists() {
+        fs::create_dir_all(&db_path)
+            .with_context(|| format!("Failed to create data directory: {:?}", db_path))?;
+        tracing::info!("Created data directory: {:?}", db_path);
+    }
+    
+    db_path.push("rights_guard.db");
+    tracing::info!("Database file path: {:?}", db_path);
+    
+    Ok(db_path)
+}
 
 fn get_database_url() -> Result<String> {
     unsafe {
@@ -14,9 +36,8 @@ fn get_database_url() -> Result<String> {
         }
     }
     
-    // Use a simple relative path in the app directory for now
-    // This will create the database in the app's working directory
-    let db_url = "sqlite:rights_guard.db".to_string();
+    let db_path = get_database_path()?;
+    let db_url = format!("sqlite:{}", db_path.display());
     
     unsafe {
         DATABASE_URL = Some(db_url.clone());
@@ -27,8 +48,17 @@ fn get_database_url() -> Result<String> {
 }
 
 pub async fn init_database() -> Result<()> {
-    let database_url = get_database_url()?;
-    let pool = SqlitePool::connect(&database_url).await?;
+    tracing::info!("Starting database initialization...");
+    
+    let database_url = get_database_url()
+        .context("Failed to determine database URL")?;
+    
+    tracing::info!("Attempting to connect to database: {}", database_url);
+    
+    let pool = SqlitePool::connect(&database_url).await
+        .with_context(|| format!("Failed to connect to database: {}", database_url))?;
+    
+    tracing::info!("Database connection established successfully");
     
     // 创建个人档案表
     sqlx::query(
@@ -121,12 +151,18 @@ pub async fn init_database() -> Result<()> {
     .execute(&pool)
     .await?;
 
+    tracing::info!("Database initialization completed successfully");
     Ok(())
 }
 
 pub async fn get_pool() -> Result<SqlitePool> {
-    let database_url = get_database_url()?;
-    Ok(SqlitePool::connect(&database_url).await?)
+    let database_url = get_database_url()
+        .context("Failed to determine database URL for pool creation")?;
+    
+    tracing::debug!("Creating new database pool for: {}", database_url);
+    
+    SqlitePool::connect(&database_url).await
+        .with_context(|| format!("Failed to create database pool: {}", database_url))
 }
 
 // 个人档案相关操作

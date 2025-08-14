@@ -205,41 +205,125 @@ pub async fn show_message(title: String, message: String, app: tauri::AppHandle)
 // Database test command
 #[tauri::command]
 pub async fn test_database() -> Result<String, CommandError> {
-    tracing::info!("Starting database test");
+    tracing::info!("Starting comprehensive database test");
+    let mut results = Vec::new();
     
-    // Test database connection
-    match database::get_pool().await {
-        Ok(_pool) => {
-            tracing::info!("Database connection successful");
-            
-            // Test profile save with minimal data
-            let test_profile = Profile {
-                id: None,
-                name: "Test User".to_string(),
-                phone: "13800138000".to_string(),
-                email: "test@example.com".to_string(),
-                id_card_number: "110101199001011234".to_string(),
-                id_card_files: None,
-                created_at: None,
-                updated_at: None,
-            };
-            
-            tracing::info!("Attempting to save test profile: {:?}", test_profile);
-            
-            match database::save_profile(&test_profile).await {
-                Ok(saved) => {
-                    tracing::info!("Test profile saved successfully with ID: {:?}", saved.id);
-                    Ok(format!("Database test successful. Profile saved with ID: {:?}", saved.id))
-                }
-                Err(e) => {
-                    tracing::error!("Test profile save failed: {:?}", e);
-                    Err(CommandError::Database(format!("Profile save test failed: {}", e)))
-                }
-            }
+    // Step 1: Test database initialization
+    tracing::info!("Step 1: Testing database initialization...");
+    match database::init_database().await {
+        Ok(()) => {
+            results.push("✓ Database initialization successful".to_string());
+            tracing::info!("Database initialization test passed");
         }
         Err(e) => {
-            tracing::error!("Database connection failed: {:?}", e);
-            Err(CommandError::Database(format!("Database connection failed: {}", e)))
+            let error_msg = format!("✗ Database initialization failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
         }
     }
+    
+    // Step 2: Test database connection
+    tracing::info!("Step 2: Testing database connection...");
+    let pool = match database::get_pool().await {
+        Ok(pool) => {
+            results.push("✓ Database connection successful".to_string());
+            tracing::info!("Database connection test passed");
+            pool
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Database connection failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    };
+    
+    // Step 3: Test basic query
+    tracing::info!("Step 3: Testing basic database query...");
+    match sqlx::query("SELECT 1").fetch_one(&pool).await {
+        Ok(_) => {
+            results.push("✓ Basic query successful".to_string());
+            tracing::info!("Basic query test passed");
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Basic query failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    }
+    
+    // Step 4: Test table existence
+    tracing::info!("Step 4: Testing table existence...");
+    match sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='profiles'")
+        .fetch_optional(&pool)
+        .await
+    {
+        Ok(Some(_)) => {
+            results.push("✓ Profiles table exists".to_string());
+            tracing::info!("Profiles table exists");
+        }
+        Ok(None) => {
+            let error_msg = "✗ Profiles table does not exist".to_string();
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Table check failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    }
+    
+    // Step 5: Test profile save with minimal data
+    tracing::info!("Step 5: Testing profile save operation...");
+    let test_profile = Profile {
+        id: None,
+        name: "Test User".to_string(),
+        phone: "13800138000".to_string(),
+        email: "test@example.com".to_string(),
+        id_card_number: "110101199001011234".to_string(),
+        id_card_files: None,
+        created_at: None,
+        updated_at: None,
+    };
+    
+    match database::save_profile(&test_profile).await {
+        Ok(saved) => {
+            results.push(format!("✓ Profile save successful (ID: {:?})", saved.id));
+            tracing::info!("Test profile saved successfully with ID: {:?}", saved.id);
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Profile save failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    }
+    
+    // Step 6: Test profile retrieval
+    tracing::info!("Step 6: Testing profile retrieval...");
+    match database::get_profile().await {
+        Ok(Some(profile)) => {
+            results.push(format!("✓ Profile retrieval successful (Name: {})", profile.name));
+            tracing::info!("Profile retrieval successful: {}", profile.name);
+        }
+        Ok(None) => {
+            let error_msg = "✗ No profile found after save".to_string();
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Profile retrieval failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+        }
+    }
+    
+    results.push("".to_string());
+    results.push("🎉 Database test completed successfully!".to_string());
+    Ok(results.join("\n"))
 }
