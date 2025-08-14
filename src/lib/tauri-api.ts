@@ -629,7 +629,6 @@ class TauriAPI {
       };
     }
   }
-}
 
   // Diagnostic methods for debugging
   async getDiagnosticInfo(): Promise<{
