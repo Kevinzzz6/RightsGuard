@@ -327,3 +327,28 @@ pub async fn test_database() -> Result<String, CommandError> {
     results.push("🎉 Database test completed successfully!".to_string());
     Ok(results.join("\n"))
 }
+
+// Database diagnostic command
+#[tauri::command]
+pub async fn get_database_diagnostics() -> Result<String, CommandError> {
+    tracing::info!("Getting database diagnostic information");
+    
+    match database::get_database_info().await {
+        Ok(info) => {
+            tracing::info!("Database diagnostics retrieved successfully");
+            Ok(info)
+        }
+        Err(e) => {
+            tracing::error!("Failed to get database diagnostics: {}", e);
+            Err(CommandError::Database(format!("Diagnostic failed: {}", e)))
+        }
+    }
+}
+
+// Clear database cache command
+#[tauri::command]
+pub async fn clear_database_cache() -> Result<String, CommandError> {
+    tracing::info!("Clearing database cache");
+    database::clear_database_cache();
+    Ok("Database cache cleared successfully".to_string())
+}

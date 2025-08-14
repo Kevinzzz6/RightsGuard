@@ -733,6 +733,54 @@ class TauriAPI {
     console.log('[TauriAPI] Backend connection test results:', { success: overallSuccess, testResults });
     return { success: overallSuccess, testResults };
   }
+
+  // Database diagnostics API
+  async getDatabaseDiagnostics(): Promise<string> {
+    console.log('[TauriAPI] getDatabaseDiagnostics called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock diagnostics - not in Tauri environment');
+      return "Mock Diagnostics:\n✓ Mock environment detected\n✓ Web mode active\n✓ No real database connection needed";
+    }
+
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for diagnostics...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling get_database_diagnostics command...');
+      const result = await invoke<string>('get_database_diagnostics');
+      console.log('[TauriAPI] Database diagnostics result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to get database diagnostics:', error);
+      throw new Error(`Database diagnostics failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Clear database cache API
+  async clearDatabaseCache(): Promise<string> {
+    console.log('[TauriAPI] clearDatabaseCache called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock cache clear - not in Tauri environment');
+      return "Mock cache cleared successfully";
+    }
+
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for cache clear...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling clear_database_cache command...');
+      const result = await invoke<string>('clear_database_cache');
+      console.log('[TauriAPI] Database cache clear result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to clear database cache:', error);
+      throw new Error(`Database cache clear failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
 }
 
 // 导出单例实例

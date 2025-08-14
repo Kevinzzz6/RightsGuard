@@ -5,13 +5,58 @@ use anyhow::{Result, Context};
 use crate::models::{Profile, IpAsset, Case};
 use std::path::PathBuf;
 use std::fs;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+use tauri::Manager;
 
-// Database path will be initialized at runtime
-static mut DATABASE_URL: Option<String> = None;
+// Global database URL storage with thread safety
+static DATABASE_URL: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
+// Store app handle for path resolution
+static APP_HANDLE: Lazy<Arc<Mutex<Option<tauri::AppHandle>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+
+/// Initialize the database system with the app handle
+/// This must be called once during app setup before any database operations
+pub fn set_app_handle(handle: tauri::AppHandle) {
+    let mut app_handle = APP_HANDLE.lock().unwrap();
+    *app_handle = Some(handle);
+    tracing::info!("App handle set for database path resolution");
+}
+
+/// Get the proper database path using Tauri's app data directory
+/// This works consistently in both development and production builds
 fn get_database_path() -> Result<PathBuf> {
-    // Get the current executable directory for development
-    // In a real Tauri app, you'd use app.path().app_data_dir()
+    // First try to use Tauri's app data directory (preferred)
+    if let Ok(app_handle_guard) = APP_HANDLE.lock() {
+        if let Some(handle) = app_handle_guard.as_ref() {
+            tracing::info!("Using Tauri app data directory for database path");
+            
+            let app_data_dir = handle.path().app_data_dir()
+                .context("Failed to get app data directory")?;
+            
+            // Create the app data directory if it doesn't exist
+            if !app_data_dir.exists() {
+                fs::create_dir_all(&app_data_dir)
+                    .with_context(|| format!("Failed to create app data directory: {:?}", app_data_dir))?;
+                tracing::info!("Created app data directory: {:?}", app_data_dir);
+            }
+            
+            // Create data subdirectory for organized storage
+            let data_dir = app_data_dir.join("data");
+            if !data_dir.exists() {
+                fs::create_dir_all(&data_dir)
+                    .with_context(|| format!("Failed to create data directory: {:?}", data_dir))?;
+                tracing::info!("Created data directory: {:?}", data_dir);
+            }
+            
+            let db_path = data_dir.join("rights_guard.db");
+            tracing::info!("Database file path (app data): {:?}", db_path);
+            return Ok(db_path);
+        }
+    }
+    
+    // Fallback to current directory method if app handle not available
+    tracing::warn!("App handle not available, falling back to current directory method");
     let mut db_path = std::env::current_dir()
         .context("Failed to get current directory")?;
     
@@ -20,33 +65,35 @@ fn get_database_path() -> Result<PathBuf> {
     if !db_path.exists() {
         fs::create_dir_all(&db_path)
             .with_context(|| format!("Failed to create data directory: {:?}", db_path))?;
-        tracing::info!("Created data directory: {:?}", db_path);
+        tracing::info!("Created data directory (fallback): {:?}", db_path);
     }
     
     db_path.push("rights_guard.db");
-    tracing::info!("Database file path: {:?}", db_path);
+    tracing::info!("Database file path (fallback): {:?}", db_path);
     
     Ok(db_path)
 }
 
+/// Get the database URL, initializing it if necessary
 fn get_database_url() -> Result<String> {
-    unsafe {
-        if let Some(ref url) = DATABASE_URL {
-            return Ok(url.clone());
-        }
+    let mut url_guard = DATABASE_URL.lock().unwrap();
+    
+    if let Some(ref url) = *url_guard {
+        return Ok(url.clone());
     }
     
-    let db_path = get_database_path()?;
+    let db_path = get_database_path()
+        .context("Failed to resolve database path")?;
     let db_url = format!("sqlite:{}", db_path.display());
     
-    unsafe {
-        DATABASE_URL = Some(db_url.clone());
-    }
+    *url_guard = Some(db_url.clone());
     
-    tracing::info!("Using database URL: {}", db_url);
+    tracing::info!("Database URL initialized: {}", db_url);
     Ok(db_url)
 }
 
+/// Initialize the database with proper error handling and logging
+/// This function creates all necessary tables and sets up the database schema
 pub async fn init_database() -> Result<()> {
     tracing::info!("Starting database initialization...");
     
@@ -397,4 +444,69 @@ pub async fn delete_case(id: Uuid) -> Result<bool> {
     .await?;
     
     Ok(result.rows_affected() > 0)
+}
+
+/// Clear the cached database URL to force path re-resolution
+/// Useful for testing or if the app data directory changes
+pub fn clear_database_cache() {
+    let mut url_guard = DATABASE_URL.lock().unwrap();
+    *url_guard = None;
+    tracing::info!("Database URL cache cleared");
+}
+
+/// Get diagnostic information about the database configuration
+/// Returns detailed information about paths and connection status
+pub async fn get_database_info() -> Result<String> {
+    let mut info = Vec::new();
+    
+    // App handle status - scope the mutex guard
+    let app_handle_exists = {
+        let app_handle = APP_HANDLE.lock().unwrap();
+        app_handle.is_some()
+    }; // Mutex guard is dropped here
+    
+    if app_handle_exists {
+        info.push("✓ App handle initialized".to_string());
+    } else {
+        info.push("✗ App handle not initialized".to_string());
+        return Ok(info.join("\n"));
+    }
+    
+    // Database path resolution
+    match get_database_path() {
+        Ok(path) => {
+            info.push(format!("✓ Database path: {:?}", path));
+            info.push(format!("✓ Path exists: {}", path.exists()));
+            
+            if let Some(parent) = path.parent() {
+                info.push(format!("✓ Parent directory: {:?}", parent));
+                info.push(format!("✓ Parent exists: {}", parent.exists()));
+            }
+        }
+        Err(e) => {
+            info.push(format!("✗ Failed to resolve database path: {}", e));
+        }
+    }
+    
+    // Database URL
+    match get_database_url() {
+        Ok(url) => {
+            info.push(format!("✓ Database URL: {}", url));
+        }
+        Err(e) => {
+            info.push(format!("✗ Failed to get database URL: {}", e));
+        }
+    }
+    
+    // Connection test - now safe to await since no guards are held
+    match get_pool().await {
+        Ok(_pool) => {
+            info.push("✓ Database connection successful".to_string());
+        }
+        Err(e) => {
+            info.push(format!("✗ Database connection failed: {}", e));
+        }
+    }
+    
+    Ok(info.join("\n"))
 }

@@ -25,11 +25,15 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // 设置数据库应用程序句柄
+            let app_handle = app.handle().clone();
+            database::set_app_handle(app_handle);
+            
             // 初始化数据库
-            let _app_handle = app.handle();
             tauri::async_runtime::block_on(async {
                 if let Err(e) = database::init_database().await {
                     eprintln!("Failed to initialize database: {}", e);
+                    tracing::error!("Database initialization failed: {:?}", e);
                 }
             });
 
@@ -115,7 +119,9 @@ fn main() {
             show_message,
             
             // 调试命令
-            test_database
+            test_database,
+            get_database_diagnostics,
+            clear_database_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
