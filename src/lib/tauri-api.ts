@@ -57,7 +57,16 @@ class TauriAPI {
 
   constructor() {
     // 在服务器端渲染时，默认为false
-    this.isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    const inBrowser = typeof window !== 'undefined';
+    const hasTauriInternals = inBrowser && '__TAURI_INTERNALS__' in window;
+    
+    console.log('[TauriAPI] Environment check:');
+    console.log('  - inBrowser:', inBrowser);
+    console.log('  - hasTauriInternals:', hasTauriInternals);
+    console.log('  - window object keys:', inBrowser ? Object.keys(window).filter(k => k.includes('TAURI')).join(', ') : 'N/A');
+    
+    this.isTauri = hasTauriInternals;
+    console.log('[TauriAPI] Final isTauri:', this.isTauri);
   }
 
   // 检查是否在Tauri环境中
@@ -88,13 +97,18 @@ class TauriAPI {
   }
 
   async saveProfile(profile: Omit<Profile, 'createdAt' | 'updatedAt'>): Promise<Profile> {
+    console.log('[TauriAPI] saveProfile called, isTauri:', this.isTauri);
+    console.log('[TauriAPI] Profile to save:', profile);
+    
     if (!this.isTauri) {
       // Mock save for web environment
-      alert('个人档案已保存！');
+      console.log('[TauriAPI] Using mock save - not in Tauri environment');
+      alert('模拟环境：个人档案已保存！(数据不会真正保存)');
       return { ...profile, id: Date.now().toString() };
     }
     
     try {
+      console.log('[TauriAPI] Importing Tauri invoke function...');
       const { invoke } = await import('@tauri-apps/api/core');
       
       // Convert files array to JSON string
@@ -103,9 +117,13 @@ class TauriAPI {
         idCardFiles: profile.idCardFiles ? JSON.stringify(profile.idCardFiles) : undefined
       };
       
-      return await invoke<Profile>('save_profile', { profile: profileData });
+      console.log('[TauriAPI] Calling Tauri invoke with data:', profileData);
+      const result = await invoke<Profile>('save_profile', { profile: profileData });
+      console.log('[TauriAPI] Save successful, result:', result);
+      
+      return result;
     } catch (error) {
-      console.error('Failed to save profile:', error);
+      console.error('[TauriAPI] Failed to save profile:', error);
       throw error;
     }
   }

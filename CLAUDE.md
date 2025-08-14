@@ -28,7 +28,7 @@ Check the project for test scripts - none are currently defined in package.json.
 
 ## Memories
 - 当你需要运行npm run build:tauri的时候，请告诉我，我会新开一个终端运行并告诉你结果。
-- 更新完代码及时commit并push到github。
+- 更新完代码及时commit。
 
 ## Architecture
 
@@ -125,11 +125,18 @@ The application automatically detects its running environment:
    - 优化数据库路径和连接管理
    - 添加详细的调试日志输出
 
+### ✅ 已完成的功能 (续)  
+7. **SQL语法错误修复** - 发现并修复数据库保存的关键问题
+   - 修复了INSERT语句中多余的右括号导致的SQL语法错误
+   - 添加了详细的前端和后端调试日志
+   - 增强了数据库操作的错误处理和日志记录
+   - 优化了环境检测和API调用链路追踪
+
 ### 🔧 当前正在验证  
-- **数据持久化测试** - 验证字段名修复是否解决保存问题
-  - 已修复前端(camelCase)和后端(snake_case)字段名不匹配
-  - 已优化数据库连接和错误处理  
-  - 需要测试实际保存功能是否正常工作
+- **数据持久化完整测试** - 验证SQL修复后保存功能是否正常
+  - 已修复关键的SQL语法错误
+  - 已添加完整的调试日志追踪整个保存流程
+  - 需要测试保存功能是否最终解决
 
 ### 🎯 下一步计划
 1. **数据持久化验证** (优先级高)

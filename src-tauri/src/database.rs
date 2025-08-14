@@ -141,10 +141,18 @@ pub async fn get_profile() -> Result<Option<Profile>> {
 }
 
 pub async fn save_profile(profile: &Profile) -> Result<Profile> {
-    let pool = get_pool().await?;
-    let now = Utc::now();
+    tracing::info!("Starting save_profile for: {:?}", profile.name);
+    tracing::debug!("Full profile data: {:?}", profile);
     
+    let pool = get_pool().await.map_err(|e| {
+        tracing::error!("Failed to get database pool: {:?}", e);
+        e
+    })?;
+    
+    let now = Utc::now();
     let profile_id = profile.id.unwrap_or_else(Uuid::new_v4);
+    
+    tracing::info!("Using profile ID: {:?}", profile_id);
     
     sqlx::query(
         r#"
@@ -152,7 +160,6 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
             id, name, phone, email, id_card_number, id_card_files, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 
             COALESCE((SELECT created_at FROM profiles WHERE id = ?1), ?7), ?7)
-        )
         "#,
     )
     .bind(profile_id.to_string())
@@ -163,10 +170,24 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
     .bind(&profile.id_card_files)
     .bind(now.to_rfc3339())
     .execute(&pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::error!("Database INSERT failed: {:?}", e);
+        e
+    })?;
 
+    tracing::info!("Database INSERT successful, retrieving saved profile...");
     let saved_profile = get_profile().await?;
-    Ok(saved_profile.unwrap())
+    match saved_profile {
+        Some(profile) => {
+            tracing::info!("Profile retrieved successfully: {:?}", profile.name);
+            Ok(profile)
+        }
+        None => {
+            tracing::error!("Failed to retrieve saved profile");
+            Err(anyhow::anyhow!("Profile was saved but could not be retrieved"))
+        }
+    }
 }
 
 // IP资产相关操作
