@@ -63,10 +63,17 @@ class TauriAPI {
     console.log('[TauriAPI] Environment check:');
     console.log('  - inBrowser:', inBrowser);
     console.log('  - hasTauriInternals:', hasTauriInternals);
-    console.log('  - window object keys:', inBrowser ? Object.keys(window).filter(k => k.includes('TAURI')).join(', ') : 'N/A');
+    console.log('  - window.navigator.userAgent:', inBrowser ? window.navigator.userAgent : 'N/A');
+    console.log('  - window object keys with TAURI:', inBrowser ? Object.keys(window).filter(k => k.includes('TAURI')).join(', ') : 'N/A');
+    
+    // Additional debug info
+    if (inBrowser) {
+      console.log('  - window.__TAURI_INTERNALS__:', window.__TAURI_INTERNALS__ ? 'exists' : 'missing');
+      console.log('  - process.env.NODE_ENV:', process.env.NODE_ENV);
+    }
     
     this.isTauri = hasTauriInternals;
-    console.log('[TauriAPI] Final isTauri:', this.isTauri);
+    console.log('[TauriAPI] Final isTauri decision:', this.isTauri);
   }
 
   // 检查是否在Tauri环境中
@@ -137,6 +144,7 @@ class TauriAPI {
     try {
       console.log('[TauriAPI] Importing Tauri invoke function...');
       const { invoke } = await import('@tauri-apps/api/core');
+      console.log('[TauriAPI] Tauri invoke function imported successfully');
       
       // Prepare profile data for backend
       const profileData = { ...profile };
@@ -155,10 +163,15 @@ class TauriAPI {
       }
       
       console.log('[TauriAPI] Final profile data for backend:', profileData);
-      console.log('[TauriAPI] Calling save_profile command...');
+      console.log('[TauriAPI] About to call save_profile command...');
       
+      const startTime = Date.now();
       const result = await invoke<Profile>('save_profile', { profile: profileData });
+      const endTime = Date.now();
+      
+      console.log('[TauriAPI] Save command completed in', endTime - startTime, 'ms');
       console.log('[TauriAPI] Save successful, raw result:', result);
+      console.log('[TauriAPI] Result type:', typeof result, 'keys:', result ? Object.keys(result) : 'null/undefined');
       
       // Process the returned profile to parse idCardFiles back to array
       if (result && result.idCardFiles && typeof result.idCardFiles === 'string') {
@@ -173,13 +186,25 @@ class TauriAPI {
       console.log('[TauriAPI] Final processed result:', result);
       return result;
     } catch (error) {
-      console.error('[TauriAPI] Failed to save profile:', error);
-      console.error('[TauriAPI] Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace',
-        type: typeof error,
-        error
-      });
+      console.error('[TauriAPI] Failed to save profile - DETAILED ERROR LOG:');
+      console.error('[TauriAPI] Error type:', typeof error);
+      console.error('[TauriAPI] Error constructor:', error?.constructor?.name);
+      console.error('[TauriAPI] Error message:', error instanceof Error ? error.message : String(error));
+      console.error('[TauriAPI] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('[TauriAPI] Full error object:', error);
+      
+      // Try to extract more details from Tauri-specific errors
+      if (error && typeof error === 'object') {
+        console.error('[TauriAPI] Error properties:', Object.getOwnPropertyNames(error));
+        console.error('[TauriAPI] Error details:', {
+          name: (error as any).name,
+          message: (error as any).message,
+          stack: (error as any).stack,
+          cause: (error as any).cause,
+          code: (error as any).code
+        });
+      }
+      
       throw error;
     }
   }
@@ -585,17 +610,129 @@ class TauriAPI {
       const { invoke } = await import('@tauri-apps/api/core');
       
       console.log('[TauriAPI] Calling test_database command...');
-      const result = await invoke<{ success: boolean; message: string }>('test_database');
-      console.log('[TauriAPI] Database test result:', result);
+      const result = await invoke<string>('test_database');
+      console.log('[TauriAPI] Database test result (string):', result);
       
-      return result;
+      // Backend returns string, convert to expected format
+      return { success: true, message: result };
     } catch (error) {
       console.error('[TauriAPI] Failed to test database:', error);
+      console.error('[TauriAPI] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        type: typeof error,
+        error
+      });
       return { 
         success: false, 
         message: `Database test failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
       };
     }
+  }
+}
+
+  // Diagnostic methods for debugging
+  async getDiagnosticInfo(): Promise<{
+    isTauri: boolean;
+    canImportTauri: boolean;
+    tauriApiAvailable: boolean;
+    windowKeys: string[];
+    userAgent: string;
+    environment: string;
+    timestamp: string;
+  }> {
+    console.log('[TauriAPI] Running diagnostic check...');
+    
+    const diagnostics = {
+      isTauri: this.isTauri,
+      canImportTauri: false,
+      tauriApiAvailable: false,
+      windowKeys: typeof window !== 'undefined' ? Object.keys(window).filter(k => k.includes('TAURI')) : [],
+      userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'N/A',
+      environment: process.env.NODE_ENV || 'unknown',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Test if we can import Tauri
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      diagnostics.canImportTauri = true;
+      diagnostics.tauriApiAvailable = typeof invoke === 'function';
+      console.log('[TauriAPI] Tauri import successful, invoke type:', typeof invoke);
+    } catch (error) {
+      console.log('[TauriAPI] Tauri import failed:', error);
+    }
+    
+    console.log('[TauriAPI] Diagnostic results:', diagnostics);
+    return diagnostics;
+  }
+  
+  // Test basic communication with backend
+  async testBackendConnection(): Promise<{
+    success: boolean;
+    testResults: Array<{ command: string; success: boolean; error?: string; duration: number }>;
+  }> {
+    console.log('[TauriAPI] Testing backend connection...');
+    
+    if (!this.isTauri) {
+      return {
+        success: false,
+        testResults: [{ command: 'environment_check', success: false, error: 'Not in Tauri environment', duration: 0 }]
+      };
+    }
+    
+    const testResults: Array<{ command: string; success: boolean; error?: string; duration: number }> = [];
+    let overallSuccess = true;
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      // Test 1: test_database command
+      try {
+        const start = Date.now();
+        await invoke('test_database');
+        const duration = Date.now() - start;
+        testResults.push({ command: 'test_database', success: true, duration });
+      } catch (error) {
+        const duration = Date.now() - Date.now();
+        testResults.push({ 
+          command: 'test_database', 
+          success: false, 
+          error: error instanceof Error ? error.message : String(error),
+          duration 
+        });
+        overallSuccess = false;
+      }
+      
+      // Test 2: get_profile command
+      try {
+        const start = Date.now();
+        await invoke('get_profile');
+        const duration = Date.now() - start;
+        testResults.push({ command: 'get_profile', success: true, duration });
+      } catch (error) {
+        const duration = Date.now() - Date.now();
+        testResults.push({ 
+          command: 'get_profile', 
+          success: false, 
+          error: error instanceof Error ? error.message : String(error),
+          duration 
+        });
+        overallSuccess = false;
+      }
+      
+    } catch (importError) {
+      testResults.push({
+        command: 'tauri_import',
+        success: false,
+        error: importError instanceof Error ? importError.message : String(importError),
+        duration: 0
+      });
+      overallSuccess = false;
+    }
+    
+    console.log('[TauriAPI] Backend connection test results:', { success: overallSuccess, testResults });
+    return { success: overallSuccess, testResults };
   }
 }
 

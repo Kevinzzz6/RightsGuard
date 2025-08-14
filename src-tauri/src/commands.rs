@@ -205,6 +205,8 @@ pub async fn show_message(title: String, message: String, app: tauri::AppHandle)
 // Database test command
 #[tauri::command]
 pub async fn test_database() -> Result<String, CommandError> {
+    tracing::info!("Starting database test");
+    
     // Test database connection
     match database::get_pool().await {
         Ok(_pool) => {
@@ -221,6 +223,8 @@ pub async fn test_database() -> Result<String, CommandError> {
                 created_at: None,
                 updated_at: None,
             };
+            
+            tracing::info!("Attempting to save test profile: {:?}", test_profile);
             
             match database::save_profile(&test_profile).await {
                 Ok(saved) => {
