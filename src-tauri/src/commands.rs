@@ -42,7 +42,18 @@ pub async fn get_profile() -> Result<Option<Profile>, CommandError> {
 
 #[tauri::command]
 pub async fn save_profile(profile: Profile) -> Result<Profile, CommandError> {
-    Ok(database::save_profile(&profile).await?)
+    tracing::info!("Attempting to save profile: {:?}", profile.name);
+    
+    match database::save_profile(&profile).await {
+        Ok(saved_profile) => {
+            tracing::info!("Profile saved successfully: {:?}", saved_profile.id);
+            Ok(saved_profile)
+        }
+        Err(e) => {
+            tracing::error!("Failed to save profile: {:?}", e);
+            Err(CommandError::Database(e.to_string()))
+        }
+    }
 }
 
 // IP资产相关命令
@@ -129,7 +140,7 @@ pub async fn select_file(app: tauri::AppHandle) -> Result<FileSelection, Command
         });
     
     let paths = match rx.recv() {
-        Ok(Some(path)) => vec![path.to_string_lossy().to_string()],
+        Ok(Some(path)) => vec![path.to_string()],
         _ => vec![]
     };
     
@@ -154,7 +165,7 @@ pub async fn select_files(app: tauri::AppHandle) -> Result<FileSelection, Comman
         });
     
     let paths = match rx.recv() {
-        Ok(Some(paths)) => paths.into_iter().map(|path| path.to_string_lossy().to_string()).collect(),
+        Ok(Some(paths)) => paths.into_iter().map(|path| path.to_string()).collect(),
         _ => vec![]
     };
     

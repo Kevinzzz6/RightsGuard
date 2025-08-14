@@ -9,41 +9,63 @@ pub struct Profile {
     pub name: String,
     pub phone: String,
     pub email: String,
+    #[serde(rename = "idCardNumber")]
     pub id_card_number: String,
+    #[serde(rename = "idCardFiles")]
     pub id_card_files: Option<String>, // JSON string of file paths
+    #[serde(rename = "createdAt")]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(rename = "updatedAt")]
     pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct IpAsset {
     pub id: Option<Uuid>,
+    #[serde(rename = "workName")]
     pub work_name: String,
+    #[serde(rename = "workType")]
     pub work_type: String,
     pub owner: String,
     pub region: String,
+    #[serde(rename = "workStartDate")]
     pub work_start_date: String,
+    #[serde(rename = "workEndDate")]
     pub work_end_date: String,
+    #[serde(rename = "equityType")]
     pub equity_type: String,
+    #[serde(rename = "isAgent")]
     pub is_agent: bool,
+    #[serde(rename = "authStartDate")]
     pub auth_start_date: Option<String>,
+    #[serde(rename = "authEndDate")]
     pub auth_end_date: Option<String>,
+    #[serde(rename = "authFiles")]
     pub auth_files: Option<String>, // JSON string of file paths
+    #[serde(rename = "workProofFiles")]
     pub work_proof_files: Option<String>, // JSON string of file paths
     pub status: String,
+    #[serde(rename = "createdAt")]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(rename = "updatedAt")]
     pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct Case {
     pub id: Option<Uuid>,
+    #[serde(rename = "infringingUrl")]
     pub infringing_url: String,
+    #[serde(rename = "originalUrl")]
     pub original_url: Option<String>,
+    #[serde(rename = "associatedIpId")]
     pub associated_ip_id: Option<Uuid>,
     pub status: String,
+    #[serde(rename = "submissionDate")]
     pub submission_date: Option<DateTime<Utc>>,
+    #[serde(rename = "createdAt")]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(rename = "updatedAt")]
     pub updated_at: Option<DateTime<Utc>>,
 }
 
@@ -56,10 +78,13 @@ pub struct AutomationRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AutomationStatus {
+    #[serde(rename = "isRunning")]
     pub is_running: bool,
+    #[serde(rename = "currentStep")]
     pub current_step: Option<String>,
     pub progress: Option<f32>,
     pub error: Option<String>,
+    #[serde(rename = "startedAt")]
     pub started_at: Option<DateTime<Utc>>,
 }
 

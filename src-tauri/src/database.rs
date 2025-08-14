@@ -4,10 +4,31 @@ use chrono::Utc;
 use anyhow::Result;
 use crate::models::{Profile, IpAsset, Case};
 
-static DATABASE_URL: &str = "sqlite:./rights_guard.db";
+// Database path will be initialized at runtime
+static mut DATABASE_URL: Option<String> = None;
+
+fn get_database_url() -> Result<String> {
+    unsafe {
+        if let Some(ref url) = DATABASE_URL {
+            return Ok(url.clone());
+        }
+    }
+    
+    // Use a simple relative path in the app directory for now
+    // This will create the database in the app's working directory
+    let db_url = "sqlite:rights_guard.db".to_string();
+    
+    unsafe {
+        DATABASE_URL = Some(db_url.clone());
+    }
+    
+    tracing::info!("Using database URL: {}", db_url);
+    Ok(db_url)
+}
 
 pub async fn init_database() -> Result<()> {
-    let pool = SqlitePool::connect(DATABASE_URL).await?;
+    let database_url = get_database_url()?;
+    let pool = SqlitePool::connect(&database_url).await?;
     
     // 创建个人档案表
     sqlx::query(
@@ -104,7 +125,8 @@ pub async fn init_database() -> Result<()> {
 }
 
 pub async fn get_pool() -> Result<SqlitePool> {
-    Ok(SqlitePool::connect(DATABASE_URL).await?)
+    let database_url = get_database_url()?;
+    Ok(SqlitePool::connect(&database_url).await?)
 }
 
 // 个人档案相关操作
