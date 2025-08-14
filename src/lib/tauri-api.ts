@@ -1,17 +1,17 @@
 // Tauri API 客户端
 export interface Profile {
-  id?: string;
+  id?: string; // UUID string from backend
   name: string;
   phone: string;
   email: string;
   idCardNumber: string;
-  idCardFiles?: string[];
+  idCardFiles?: string[] | string; // Can be array (frontend) or JSON string (backend)
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface IpAsset {
-  id?: string;
+  id?: string; // UUID string from backend
   workName: string;
   workType: string;
   owner: string;
@@ -22,18 +22,18 @@ export interface IpAsset {
   isAgent: boolean;
   authStartDate?: string;
   authEndDate?: string;
-  authFiles?: string[];
-  workProofFiles?: string[];
+  authFiles?: string[] | string; // Can be array (frontend) or JSON string (backend)
+  workProofFiles?: string[] | string; // Can be array (frontend) or JSON string (backend)
   status: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface Case {
-  id?: string;
+  id?: string; // UUID string from backend
   infringingUrl: string;
   originalUrl?: string;
-  associatedIpId?: string;
+  associatedIpId?: string; // UUID string from backend
   status: string;
   submissionDate?: string;
   createdAt?: string;
@@ -76,8 +76,11 @@ class TauriAPI {
 
   // 个人档案相关API
   async getProfile(): Promise<Profile | null> {
+    console.log('[TauriAPI] getProfile called, isTauri:', this.isTauri);
+    
     if (!this.isTauri) {
       // Mock data for web environment
+      console.log('[TauriAPI] Using mock profile data - not in Tauri environment');
       return {
         name: "张三",
         phone: "13800138000",
@@ -88,10 +91,34 @@ class TauriAPI {
     }
     
     try {
+      console.log('[TauriAPI] Importing Tauri invoke function for getProfile...');
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Profile>('get_profile');
+      
+      console.log('[TauriAPI] Calling get_profile command...');
+      const rawProfile = await invoke<Profile>('get_profile');
+      console.log('[TauriAPI] Raw profile from backend:', rawProfile);
+      
+      if (rawProfile) {
+        // Parse idCardFiles JSON string into array if it exists
+        let processedProfile = { ...rawProfile };
+        if (rawProfile.idCardFiles && typeof rawProfile.idCardFiles === 'string') {
+          try {
+            processedProfile.idCardFiles = JSON.parse(rawProfile.idCardFiles);
+            console.log('[TauriAPI] Parsed idCardFiles:', processedProfile.idCardFiles);
+          } catch (parseError) {
+            console.warn('[TauriAPI] Failed to parse idCardFiles JSON, using as string:', parseError);
+            // Keep as string if JSON parsing fails
+          }
+        }
+        
+        console.log('[TauriAPI] Processed profile:', processedProfile);
+        return processedProfile;
+      }
+      
+      console.log('[TauriAPI] No profile found in database');
+      return null;
     } catch (error) {
-      console.error('Failed to get profile:', error);
+      console.error('[TauriAPI] Failed to get profile:', error);
       return null;
     }
   }
@@ -111,27 +138,59 @@ class TauriAPI {
       console.log('[TauriAPI] Importing Tauri invoke function...');
       const { invoke } = await import('@tauri-apps/api/core');
       
-      // Convert files array to JSON string
-      const profileData = {
-        ...profile,
-        idCardFiles: profile.idCardFiles ? JSON.stringify(profile.idCardFiles) : undefined
-      };
+      // Prepare profile data for backend
+      const profileData = { ...profile };
       
-      console.log('[TauriAPI] Calling Tauri invoke with data:', profileData);
+      // Convert idCardFiles array to JSON string if it's an array
+      if (profile.idCardFiles) {
+        if (Array.isArray(profile.idCardFiles)) {
+          profileData.idCardFiles = JSON.stringify(profile.idCardFiles);
+          console.log('[TauriAPI] Converted idCardFiles array to JSON string:', profileData.idCardFiles);
+        } else {
+          console.log('[TauriAPI] idCardFiles is already a string:', profileData.idCardFiles);
+        }
+      } else {
+        profileData.idCardFiles = undefined;
+        console.log('[TauriAPI] No idCardFiles to process');
+      }
+      
+      console.log('[TauriAPI] Final profile data for backend:', profileData);
+      console.log('[TauriAPI] Calling save_profile command...');
+      
       const result = await invoke<Profile>('save_profile', { profile: profileData });
-      console.log('[TauriAPI] Save successful, result:', result);
+      console.log('[TauriAPI] Save successful, raw result:', result);
       
+      // Process the returned profile to parse idCardFiles back to array
+      if (result && result.idCardFiles && typeof result.idCardFiles === 'string') {
+        try {
+          result.idCardFiles = JSON.parse(result.idCardFiles);
+          console.log('[TauriAPI] Parsed returned idCardFiles:', result.idCardFiles);
+        } catch (parseError) {
+          console.warn('[TauriAPI] Failed to parse returned idCardFiles JSON:', parseError);
+        }
+      }
+      
+      console.log('[TauriAPI] Final processed result:', result);
       return result;
     } catch (error) {
       console.error('[TauriAPI] Failed to save profile:', error);
+      console.error('[TauriAPI] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        type: typeof error,
+        error
+      });
       throw error;
     }
   }
 
   // IP资产相关API
   async getIpAssets(): Promise<IpAsset[]> {
+    console.log('[TauriAPI] getIpAssets called, isTauri:', this.isTauri);
+    
     if (!this.isTauri) {
       // Mock data for web environment
+      console.log('[TauriAPI] Using mock IP assets data - not in Tauri environment');
       return [
         {
           id: '1',
@@ -165,10 +224,42 @@ class TauriAPI {
     }
     
     try {
+      console.log('[TauriAPI] Importing Tauri invoke function for getIpAssets...');
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<IpAsset[]>('get_ip_assets');
+      
+      console.log('[TauriAPI] Calling get_ip_assets command...');
+      const rawAssets = await invoke<IpAsset[]>('get_ip_assets');
+      console.log('[TauriAPI] Raw IP assets from backend:', rawAssets);
+      
+      // Process each asset to parse JSON file arrays
+      const processedAssets = rawAssets.map(asset => {
+        const processed = { ...asset };
+        
+        // Parse authFiles if it's a JSON string
+        if (asset.authFiles && typeof asset.authFiles === 'string') {
+          try {
+            processed.authFiles = JSON.parse(asset.authFiles);
+          } catch (parseError) {
+            console.warn('[TauriAPI] Failed to parse authFiles JSON for asset', asset.id, parseError);
+          }
+        }
+        
+        // Parse workProofFiles if it's a JSON string
+        if (asset.workProofFiles && typeof asset.workProofFiles === 'string') {
+          try {
+            processed.workProofFiles = JSON.parse(asset.workProofFiles);
+          } catch (parseError) {
+            console.warn('[TauriAPI] Failed to parse workProofFiles JSON for asset', asset.id, parseError);
+          }
+        }
+        
+        return processed;
+      });
+      
+      console.log('[TauriAPI] Processed IP assets:', processedAssets);
+      return processedAssets;
     } catch (error) {
-      console.error('Failed to get IP assets:', error);
+      console.error('[TauriAPI] Failed to get IP assets:', error);
       return [];
     }
   }
@@ -189,25 +280,84 @@ class TauriAPI {
   }
 
   async saveIpAsset(asset: Omit<IpAsset, 'createdAt' | 'updatedAt'>): Promise<IpAsset> {
+    console.log('[TauriAPI] saveIpAsset called, isTauri:', this.isTauri);
+    console.log('[TauriAPI] IP asset to save:', asset);
+    
     if (!this.isTauri) {
       // Mock save for web environment
+      console.log('[TauriAPI] Using mock save - not in Tauri environment');
       alert('IP资产已保存！');
       return { ...asset, id: Date.now().toString() };
     }
     
     try {
+      console.log('[TauriAPI] Importing Tauri invoke function...');
       const { invoke } = await import('@tauri-apps/api/core');
       
-      // Convert files arrays to JSON strings
-      const assetData = {
-        ...asset,
-        authFiles: asset.authFiles ? JSON.stringify(asset.authFiles) : undefined,
-        workProofFiles: asset.workProofFiles ? JSON.stringify(asset.workProofFiles) : undefined
-      };
+      // Prepare asset data for backend
+      const assetData = { ...asset };
       
-      return await invoke<IpAsset>('save_ip_asset', { asset: assetData });
+      // Convert authFiles array to JSON string if it's an array
+      if (asset.authFiles) {
+        if (Array.isArray(asset.authFiles)) {
+          assetData.authFiles = JSON.stringify(asset.authFiles);
+          console.log('[TauriAPI] Converted authFiles array to JSON string:', assetData.authFiles);
+        } else {
+          console.log('[TauriAPI] authFiles is already a string:', assetData.authFiles);
+        }
+      } else {
+        assetData.authFiles = undefined;
+      }
+      
+      // Convert workProofFiles array to JSON string if it's an array
+      if (asset.workProofFiles) {
+        if (Array.isArray(asset.workProofFiles)) {
+          assetData.workProofFiles = JSON.stringify(asset.workProofFiles);
+          console.log('[TauriAPI] Converted workProofFiles array to JSON string:', assetData.workProofFiles);
+        } else {
+          console.log('[TauriAPI] workProofFiles is already a string:', assetData.workProofFiles);
+        }
+      } else {
+        assetData.workProofFiles = undefined;
+      }
+      
+      console.log('[TauriAPI] Final asset data for backend:', assetData);
+      console.log('[TauriAPI] Calling save_ip_asset command...');
+      
+      const result = await invoke<IpAsset>('save_ip_asset', { asset: assetData });
+      console.log('[TauriAPI] Save successful, raw result:', result);
+      
+      // Process the returned asset to parse file arrays back from JSON
+      if (result) {
+        if (result.authFiles && typeof result.authFiles === 'string') {
+          try {
+            result.authFiles = JSON.parse(result.authFiles);
+            console.log('[TauriAPI] Parsed returned authFiles:', result.authFiles);
+          } catch (parseError) {
+            console.warn('[TauriAPI] Failed to parse returned authFiles JSON:', parseError);
+          }
+        }
+        
+        if (result.workProofFiles && typeof result.workProofFiles === 'string') {
+          try {
+            result.workProofFiles = JSON.parse(result.workProofFiles);
+            console.log('[TauriAPI] Parsed returned workProofFiles:', result.workProofFiles);
+          } catch (parseError) {
+            console.warn('[TauriAPI] Failed to parse returned workProofFiles JSON:', parseError);
+          }
+        }
+      }
+      
+      console.log('[TauriAPI] Final processed result:', result);
+      return result;
     } catch (error) {
-      console.error('Failed to save IP asset:', error);
+      console.error('[TauriAPI] Failed to save IP asset:', error);
+      console.error('[TauriAPI] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        type: typeof error,
+        error
+      });
       throw error;
     }
   }
@@ -417,6 +567,34 @@ class TauriAPI {
     } catch (error) {
       console.error('Failed to show message:', error);
       throw error;
+    }
+  }
+
+  // Database testing API
+  async testDatabase(): Promise<{ success: boolean; message: string }> {
+    console.log('[TauriAPI] testDatabase called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      // Mock test for web environment
+      console.log('[TauriAPI] Using mock database test - not in Tauri environment');
+      return { success: true, message: 'Mock database test successful (web environment)' };
+    }
+    
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for database test...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling test_database command...');
+      const result = await invoke<{ success: boolean; message: string }>('test_database');
+      console.log('[TauriAPI] Database test result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to test database:', error);
+      return { 
+        success: false, 
+        message: `Database test failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      };
     }
   }
 }

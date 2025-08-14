@@ -1,8 +1,9 @@
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, Row};
 use uuid::Uuid;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use anyhow::Result;
 use crate::models::{Profile, IpAsset, Case};
+use std::str::FromStr;
 
 // Database path will be initialized at runtime
 static mut DATABASE_URL: Option<String> = None;
@@ -153,8 +154,18 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
     let profile_id = profile.id.unwrap_or_else(Uuid::new_v4);
     
     tracing::info!("Using profile ID: {:?}", profile_id);
+    tracing::info!("Timestamp: {}", now.to_rfc3339());
     
-    sqlx::query(
+    // First check if profile exists
+    let existing = sqlx::query("SELECT id FROM profiles WHERE id = ?1")
+        .bind(profile_id.to_string())
+        .fetch_optional(&pool)
+        .await?;
+        
+    let is_update = existing.is_some();
+    tracing::info!("Profile exists: {}, performing {}", is_update, if is_update { "UPDATE" } else { "INSERT" });
+    
+    let result = sqlx::query(
         r#"
         INSERT OR REPLACE INTO profiles (
             id, name, phone, email, id_card_number, id_card_files, created_at, updated_at
@@ -170,21 +181,45 @@ pub async fn save_profile(profile: &Profile) -> Result<Profile> {
     .bind(&profile.id_card_files)
     .bind(now.to_rfc3339())
     .execute(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Database INSERT failed: {:?}", e);
-        e
-    })?;
+    .await;
+    
+    match result {
+        Ok(exec_result) => {
+            tracing::info!("Database operation successful. Rows affected: {}", exec_result.rows_affected());
+            
+            if exec_result.rows_affected() == 0 {
+                tracing::warn!("No rows were affected by the operation");
+            }
+        }
+        Err(e) => {
+            tracing::error!("Database INSERT/UPDATE failed: {:?}", e);
+            tracing::error!("SQL Error details: {}", e);
+            return Err(anyhow::anyhow!("Database operation failed: {}", e));
+        }
+    }
 
-    tracing::info!("Database INSERT successful, retrieving saved profile...");
-    let saved_profile = get_profile().await?;
+    tracing::info!("Retrieving saved profile by ID: {}", profile_id);
+    
+    // Directly query by ID instead of getting the latest
+    let saved_profile = sqlx::query_as::<_, Profile>("SELECT * FROM profiles WHERE id = ?1")
+        .bind(profile_id.to_string())
+        .fetch_optional(&pool)
+        .await?;
+        
     match saved_profile {
         Some(profile) => {
-            tracing::info!("Profile retrieved successfully: {:?}", profile.name);
+            tracing::info!("Profile retrieved successfully: {:?} (ID: {:?})", profile.name, profile.id);
             Ok(profile)
         }
         None => {
-            tracing::error!("Failed to retrieve saved profile");
+            tracing::error!("Failed to retrieve saved profile with ID: {}", profile_id);
+            
+            // List all profiles for debugging
+            let all_profiles = sqlx::query("SELECT id, name FROM profiles")
+                .fetch_all(&pool)
+                .await?;
+            tracing::info!("All profiles in database: {:?}", all_profiles);
+            
             Err(anyhow::anyhow!("Profile was saved but could not be retrieved"))
         }
     }
@@ -226,7 +261,6 @@ pub async fn save_ip_asset(asset: &IpAsset) -> Result<IpAsset> {
             work_proof_files, status, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             COALESCE((SELECT created_at FROM ip_assets WHERE id = ?1), ?15), ?15)
-        )
         "#,
     )
     .bind(asset_id.to_string())
@@ -292,7 +326,6 @@ pub async fn save_case(case: &Case) -> Result<Case> {
             submission_date, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6,
             COALESCE((SELECT created_at FROM cases WHERE id = ?1), ?7), ?7)
-        )
         "#,
     )
     .bind(case_id.to_string())

@@ -201,3 +201,41 @@ pub async fn show_message(title: String, message: String, app: tauri::AppHandle)
     let _ = rx.recv(); // Wait for dialog to close
     Ok(())
 }
+
+// Database test command
+#[tauri::command]
+pub async fn test_database() -> Result<String, CommandError> {
+    // Test database connection
+    match database::get_pool().await {
+        Ok(_pool) => {
+            tracing::info!("Database connection successful");
+            
+            // Test profile save with minimal data
+            let test_profile = Profile {
+                id: None,
+                name: "Test User".to_string(),
+                phone: "13800138000".to_string(),
+                email: "test@example.com".to_string(),
+                id_card_number: "110101199001011234".to_string(),
+                id_card_files: None,
+                created_at: None,
+                updated_at: None,
+            };
+            
+            match database::save_profile(&test_profile).await {
+                Ok(saved) => {
+                    tracing::info!("Test profile saved successfully with ID: {:?}", saved.id);
+                    Ok(format!("Database test successful. Profile saved with ID: {:?}", saved.id))
+                }
+                Err(e) => {
+                    tracing::error!("Test profile save failed: {:?}", e);
+                    Err(CommandError::Database(format!("Profile save test failed: {}", e)))
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Database connection failed: {:?}", e);
+            Err(CommandError::Database(format!("Database connection failed: {}", e)))
+        }
+    }
+}

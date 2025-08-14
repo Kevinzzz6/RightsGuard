@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { User, Upload, Save, Shield } from "lucide-react";
+import { User, Upload, Save, Shield, Database } from "lucide-react";
 import { useTauri } from "@/hooks/use-tauri";
 import type { Profile } from "@/lib/tauri-api";
 
@@ -29,15 +29,26 @@ export function ProfilePage() {
       if (isReady) {
         setLoading(true);
         try {
+          console.log('[Profile] Loading profile data...');
           const data = await tauriAPI.getProfile();
+          console.log('[Profile] Loaded profile data:', data);
+          
           if (data) {
-            setProfileData({
+            // Handle idCardFiles - it should already be processed by the API client
+            const processedData = {
               ...data,
-              idCardFiles: data.idCardFiles ? JSON.parse(data.idCardFiles as any) : []
-            });
+              idCardFiles: Array.isArray(data.idCardFiles) ? data.idCardFiles : []
+            };
+            console.log('[Profile] Setting processed profile data:', processedData);
+            setProfileData(processedData);
+          } else {
+            console.log('[Profile] No profile data found, using initial state');
+            setProfileData(initialProfileState);
           }
         } catch (error) {
-          console.error("Failed to load profile:", error);
+          console.error("[Profile] Failed to load profile:", error);
+          await tauriAPI.showMessage("错误", `加载个人档案失败: ${error instanceof Error ? error.message : '未知错误'}`);
+          setProfileData(initialProfileState);
         } finally {
           setLoading(false);
         }
@@ -54,28 +65,86 @@ export function ProfilePage() {
   };
 
   const handleSave = async () => {
+    console.log('[Profile] Starting save process...');
+    console.log('[Profile] Profile data to save:', profileData);
+    
+    // Basic validation
+    if (!profileData.name?.trim()) {
+      await tauriAPI.showMessage("验证错误", "请填写姓名");
+      return;
+    }
+    
+    if (!profileData.phone?.trim()) {
+      await tauriAPI.showMessage("验证错误", "请填写手机号");
+      return;
+    }
+    
+    if (!profileData.email?.trim()) {
+      await tauriAPI.showMessage("验证错误", "请填写邮箱地址");
+      return;
+    }
+    
+    if (!profileData.idCardNumber?.trim()) {
+      await tauriAPI.showMessage("验证错误", "请填写身份证号码");
+      return;
+    }
+    
     try {
-      await tauriAPI.saveProfile(profileData);
+      console.log('[Profile] Calling saveProfile API...');
+      const result = await tauriAPI.saveProfile(profileData);
+      console.log('[Profile] Save successful, result:', result);
+      
+      // Update local state with the returned data (including ID and timestamps)
+      setProfileData(result);
+      
       await tauriAPI.showMessage("成功", "个人档案已保存！");
       setIsEditing(false);
     } catch (error) {
-      console.error("Failed to save profile:", error);
-      await tauriAPI.showMessage("错误", "保存失败");
+      console.error("[Profile] Failed to save profile:", error);
+      
+      let errorMessage = "保存失败";
+      if (error instanceof Error) {
+        errorMessage = `保存失败: ${error.message}`;
+      } else if (typeof error === 'string') {
+        errorMessage = `保存失败: ${error}`;
+      }
+      
+      await tauriAPI.showMessage("错误", errorMessage);
     }
   };
 
   const handleFileSelect = async () => {
     try {
+        console.log('[Profile] Starting file selection...');
         const selection = await tauriAPI.selectFiles();
+        console.log('[Profile] File selection result:', selection);
+        
         if (selection.paths.length > 0) {
             setProfileData(prev => ({
                 ...prev,
                 idCardFiles: [...(prev.idCardFiles || []), ...selection.paths]
             }));
+            console.log('[Profile] Updated profile with new files');
         }
     } catch (error) {
-        console.error("File selection error:", error);
-        await tauriAPI.showMessage("错误", "文件选择失败");
+        console.error("[Profile] File selection error:", error);
+        await tauriAPI.showMessage("错误", `文件选择失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleTestDatabase = async () => {
+    console.log('[Profile] Testing database connectivity...');
+    try {
+      const result = await tauriAPI.testDatabase();
+      console.log('[Profile] Database test result:', result);
+      
+      await tauriAPI.showMessage(
+        result.success ? "数据库测试成功" : "数据库测试失败",
+        result.message
+      );
+    } catch (error) {
+      console.error("[Profile] Database test error:", error);
+      await tauriAPI.showMessage("错误", `数据库测试失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
   
@@ -212,6 +281,21 @@ export function ProfilePage() {
               </Button>
             )}
           </div>
+          
+          {/* Debug section - only show if in development or Tauri environment */}
+          {(process.env.NODE_ENV === 'development' || tauriAPI.isInTauri()) && (
+            <div className="flex gap-2 pt-2 border-t mt-4">
+              <Button 
+                variant="outline"
+                size="sm"
+                onClick={handleTestDatabase}
+                className="text-xs"
+              >
+                <Database className="h-3 w-3 mr-1" />
+                测试数据库连接
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

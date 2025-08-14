@@ -112,7 +112,10 @@ fn main() {
             
             // 系统相关命令
             open_url,
-            show_message
+            show_message,
+            
+            // 调试命令
+            test_database
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
