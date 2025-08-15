@@ -1,4 +1,4 @@
-use sqlx::{SqlitePool, ConnectOptions, sqlite::SqliteConnectOptions};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use uuid::Uuid;
 use chrono::Utc;
 use anyhow::{Result, Context};
@@ -26,7 +26,7 @@ pub fn set_app_handle(handle: tauri::AppHandle) {
 
 /// Get the proper database path using Tauri's app data directory
 /// This works consistently in both development and production builds
-fn get_database_path() -> Result<PathBuf> {
+pub fn get_database_path() -> Result<PathBuf> {
     // First try to use Tauri's app data directory (preferred)
     if let Ok(app_handle_guard) = APP_HANDLE.lock() {
         if let Some(handle) = app_handle_guard.as_ref() {
@@ -417,6 +417,7 @@ pub async fn get_pool() -> Result<SqlitePool> {
     
     // Use fallback connection method
     try_fallback_connection(&db_path)
+        .await
         .context("Both primary and fallback pool connections failed")
 }
 

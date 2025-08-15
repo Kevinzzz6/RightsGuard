@@ -3,9 +3,9 @@ use uuid::Uuid;
 use crate::database;
 use crate::automation;
 use crate::models::{Profile, IpAsset, Case, AutomationRequest, FileSelection, AutomationStatus};
-use std::path::PathBuf;
 use std::fs;
 use std::str::FromStr;
+use tauri::Manager;
 
 // A serializable error type for Tauri commands
 #[derive(Debug, thiserror::Error, Serialize)]
