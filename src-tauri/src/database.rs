@@ -84,7 +84,25 @@ fn get_database_url() -> Result<String> {
     
     let db_path = get_database_path()
         .context("Failed to resolve database path")?;
-    let db_url = format!("sqlite:{}", db_path.display());
+    
+    // Convert path to proper SQLite URL format for Windows
+    let path_str = db_path.to_string_lossy().replace("\\", "/");
+    let db_url = format!("sqlite:{}", path_str);
+    
+    // Additional path validation
+    tracing::info!("Database file path: {:?}", db_path);
+    tracing::info!("Database URL: {}", db_url);
+    tracing::info!("Parent directory exists: {}", db_path.parent().map_or(false, |p| p.exists()));
+    tracing::info!("Database file exists: {}", db_path.exists());
+    
+    // Ensure parent directory exists
+    if let Some(parent_dir) = db_path.parent() {
+        if !parent_dir.exists() {
+            fs::create_dir_all(parent_dir)
+                .with_context(|| format!("Failed to create parent directory: {:?}", parent_dir))?;
+            tracing::info!("Created parent directory: {:?}", parent_dir);
+        }
+    }
     
     *url_guard = Some(db_url.clone());
     
@@ -102,8 +120,30 @@ pub async fn init_database() -> Result<()> {
     
     tracing::info!("Attempting to connect to database: {}", database_url);
     
-    let pool = SqlitePool::connect(&database_url).await
-        .with_context(|| format!("Failed to connect to database: {}", database_url))?;
+    // Try connecting with detailed error information
+    let pool = match SqlitePool::connect(&database_url).await {
+        Ok(pool) => {
+            tracing::info!("Database connection established successfully");
+            pool
+        }
+        Err(e) => {
+            tracing::error!("SQLite connection failed. Error: {:?}", e);
+            tracing::error!("Connection string was: {}", database_url);
+            
+            // Additional diagnostic information
+            if let Ok(db_path) = get_database_path() {
+                tracing::error!("Database file path: {:?}", db_path);
+                tracing::error!("File exists: {}", db_path.exists());
+                if let Some(parent) = db_path.parent() {
+                    tracing::error!("Parent directory: {:?}", parent);
+                    tracing::error!("Parent exists: {}", parent.exists());
+                    tracing::error!("Parent permissions: {:?}", std::fs::metadata(parent));
+                }
+            }
+            
+            return Err(anyhow::anyhow!("Failed to connect to database: {}", e));
+        }
+    };
     
     tracing::info!("Database connection established successfully");
     
