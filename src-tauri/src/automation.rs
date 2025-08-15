@@ -90,7 +90,7 @@ async fn run_automation_process(request: Arc<AutomationRequest>) -> Result<()> {
         None
     };
     
-    // 步骤2: 启动Playwright浏览器
+    // 步骤2: 使用Windows直接启动浏览器，然后Playwright连接
     update_status("启动浏览器...", 10.0).await;
     
     // 重置验证信号
@@ -98,7 +98,7 @@ async fn run_automation_process(request: Arc<AutomationRequest>) -> Result<()> {
     *verification = false;
     drop(verification);
     
-    let browser_result = run_browser_automation(&profile, ip_asset.as_ref(), &request).await;
+    let browser_result = run_windows_browser_automation(&profile, ip_asset.as_ref(), &request).await;
     
     match browser_result {
         Ok(_) => {
@@ -120,185 +120,61 @@ async fn update_status(step: &str, progress: f32) {
     status.progress = Some(progress);
 }
 
-async fn run_browser_automation(
+async fn run_windows_browser_automation(
     profile: &crate::models::Profile,
     ip_asset: Option<&crate::models::IpAsset>,
     request: &AutomationRequest,
 ) -> Result<()> {
-    use std::process::{Command, Stdio};
     use std::fs;
     
-    // 首先验证Playwright环境
-    update_status("检查自动化环境...", 10.0).await;
+    // 方案1: 直接用Windows启动Chrome浏览器，然后Playwright连接
+    update_status("通过Windows启动Chrome浏览器...", 15.0).await;
     
-    if let Err(e) = check_automation_environment().await {
-        return Err(e);
+    // 启动Chrome浏览器，开启远程调试端口
+    let chrome_result = start_chrome_with_remote_debugging().await;
+    
+    if let Err(e) = chrome_result {
+        tracing::warn!("无法启动Chrome: {}, 回退到Playwright方案", e);
+        return run_browser_automation_fallback(profile, ip_asset, request).await;
     }
     
-    // 创建Playwright脚本
-    update_status("正在生成自动化脚本...", 12.0).await;
-    tracing::info!("生成Playwright脚本，使用个人档案: {}", profile.name);
+    // 等待浏览器启动
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
     
-    let script_content = match generate_playwright_script(profile, ip_asset, request) {
-        Ok(script) => {
-            tracing::info!("脚本生成成功，长度: {} 字符", script.len());
-            script
-        }
-        Err(e) => {
-            tracing::error!("脚本生成失败: {}", e);
-            return Err(anyhow::anyhow!("脚本生成失败: {}", e));
-        }
-    };
+    // 创建连接已有浏览器的Playwright脚本
+    update_status("生成连接脚本...", 25.0).await;
+    tracing::info!("生成Playwright连接脚本，用户: {}", profile.name);
     
-    // 将脚本写入临时文件 (Playwright需要.spec.js后缀)
-    let script_path = "temp_automation_script.spec.js";
-    match fs::write(script_path, &script_content) {
-        Ok(_) => {
-            tracing::info!("脚本文件写入成功: {}", script_path);
-        }
-        Err(e) => {
-            tracing::error!("脚本文件写入失败: {}", e);
-            return Err(anyhow::anyhow!("脚本文件写入失败: {}", e));
-        }
-    }
+    let script_content = generate_connect_script(profile, ip_asset, request)?;
     
-    update_status("正在启动系统浏览器(Chrome)自动化...", 15.0).await;
+    // 写入脚本文件
+    let script_path = "temp_connect_script.spec.js";
+    fs::write(script_path, &script_content)
+        .map_err(|e| anyhow::anyhow!("脚本文件写入失败: {}", e))?;
     
-    // 启动监控任务检查验证状态
-    let monitoring_handle = tokio::spawn(async {
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            
-            if fs::metadata("waiting_for_verification.txt").is_ok() {
-                update_status("等待人工验证 - 请完成滑块验证和短信验证", 30.0).await;
-            }
-            
-            // 如果Playwright脚本已结束，停止监控
-            if !fs::metadata("temp_automation_script.spec.js").is_ok() {
-                break;
-            }
-        }
-    });
+    update_status("连接到浏览器并执行自动化...", 30.0).await;
     
-    // 查找npx路径并执行Playwright脚本
-    update_status("正在准备启动浏览器...", 17.0).await;
-    
-    let (_, _, npx_path) = find_nodejs_paths();
-    let npx = npx_path.ok_or_else(|| anyhow::anyhow!("无法找到npx命令"))?;
-    
-    tracing::info!("准备执行Playwright命令: {} playwright test {} --headed --project=system-browser", npx, script_path);
-    
-    let mut cmd = Command::new(&npx);
-    cmd.args(&["playwright", "test", script_path, "--headed", "--project=system-browser"])
-        .current_dir(".")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    
-    // 在Windows上设置环境变量以避免路径问题
-    if cfg!(target_os = "windows") {
-        cmd.env("PLAYWRIGHT_BROWSERS_PATH", "0");
-    }
-    
-    update_status("正在启动浏览器并执行自动化...", 20.0).await;
-    tracing::info!("开始执行Playwright命令...");
-    
-    let output = match cmd.output() {
-        Ok(result) => {
-            tracing::info!("Playwright命令执行完成，返回码: {:?}", result.status.code());
-            Ok(result)
-        }
-        Err(e) => {
-            tracing::error!("Playwright命令执行失败: {}", e);
-            Err(e)
-        }
-    };
-    
-    // 停止监控任务
-    monitoring_handle.abort();
+    // 使用最简单的npx执行
+    let npx_result = execute_simple_playwright(script_path).await;
     
     // 清理临时文件
-    cleanup_temp_files().await;
+    let _ = fs::remove_file(script_path);
     
-    match output {
-        Ok(result) => {
-            let stdout_output = String::from_utf8_lossy(&result.stdout);
-            let stderr_output = String::from_utf8_lossy(&result.stderr);
-            
-            tracing::info!("Playwright stdout: {}", stdout_output);
-            if !stderr_output.is_empty() {
-                tracing::warn!("Playwright stderr: {}", stderr_output);
-            }
-            
-            if result.status.success() {
-                tracing::info!("Chrome浏览器自动化执行成功");
-                Ok(())
-            } else {
-                tracing::error!("Chrome浏览器执行失败，尝试使用Edge作为备选");
-                
-                // 尝试使用Edge作为备选浏览器
-                let edge_output = Command::new(&npx)
-                    .args(&[
-                        "playwright", 
-                        "test", 
-                        script_path, 
-                        "--headed", 
-                        "--project=system-browser-edge"
-                    ])
-                    .current_dir(".")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .output();
-                    
-                match edge_output {
-                    Ok(edge_result) => {
-                        let _edge_stdout = String::from_utf8_lossy(&edge_result.stdout);
-                        let _edge_stderr = String::from_utf8_lossy(&edge_result.stderr);
-                        
-                        if edge_result.status.success() {
-                            tracing::info!("Edge备选浏览器执行成功");
-                            Ok(())
-                        } else {
-                            let error_details = if stderr_output.trim().is_empty() {
-                                stdout_output.trim()
-                            } else {
-                                stderr_output.trim()
-                            };
-                            
-                            // 提供更具体的错误诊断
-                            let diagnostic_message = diagnose_playwright_error(error_details, result.status.code());
-                            
-                            tracing::error!("Chrome和Edge都执行失败: {}", diagnostic_message);
-                            Err(anyhow::anyhow!("Chrome和Edge浏览器都执行失败: {}", diagnostic_message))
-                        }
-                    }
-                    Err(e) => {
-                        let error_details = if stderr_output.trim().is_empty() {
-                            stdout_output.trim()
-                        } else {
-                            stderr_output.trim()
-                        };
-                        
-                        let diagnostic_message = diagnose_playwright_error(error_details, result.status.code());
-                        tracing::error!("无法启动备选浏览器: {}", e);
-                        Err(anyhow::anyhow!("Chrome主浏览器失败且无法启动Edge备选: {}", diagnostic_message))
-                    }
-                }
-            }
+    match npx_result {
+        Ok(_) => {
+            tracing::info!("Windows浏览器自动化执行成功");
+            Ok(())
         }
         Err(e) => {
-            cleanup_temp_files().await;
-            let error_msg = format!(
-                "无法启动Playwright命令: {}\n\n请检查:\n1. Node.js是否已安装 (需要版本14+)\n2. 是否在项目根目录运行\n3. 是否已运行 'npm install'\n4. 网络连接是否正常\n5. 防火墙是否阻止了浏览器启动",
-                e
-            );
-            tracing::error!("Failed to execute Playwright command: {}", error_msg);
-            update_status("浏览器启动失败", 0.0).await;
-            Err(anyhow::anyhow!(error_msg))
+            tracing::error!("Windows浏览器自动化失败: {}", e);
+            // 如果Windows方案失败，回退到原始方案
+            run_browser_automation_fallback(profile, ip_asset, request).await
         }
     }
 }
 
 // 检查自动化环境依赖
+#[allow(dead_code)]
 async fn check_automation_environment() -> Result<()> {
     use std::process::Command;
     
@@ -411,24 +287,100 @@ async fn check_automation_environment() -> Result<()> {
     Ok(())
 }
 
-// 智能查找Node.js工具的完整路径
+// 智能查找Node.js工具的完整路径 - 改进版本
 fn find_nodejs_paths() -> (Option<String>, Option<String>, Option<String>) {
+    use std::path::Path;
+    
+    // Windows特定路径
+    #[cfg(target_os = "windows")]
     let potential_paths = vec![
+        // 标准安装路径
         ("C:\\Program Files\\nodejs\\node.exe", "C:\\Program Files\\nodejs\\npm.cmd", "C:\\Program Files\\nodejs\\npx.cmd"),
         ("C:\\Program Files (x86)\\nodejs\\node.exe", "C:\\Program Files (x86)\\nodejs\\npm.cmd", "C:\\Program Files (x86)\\nodejs\\npx.cmd"),
-        ("node", "npm", "npx"), // 备选：使用PATH中的命令
+        
+        // 用户本地安装路径
+        ("C:\\Users\\%USERNAME%\\AppData\\Roaming\\npm\\node.exe", "C:\\Users\\%USERNAME%\\AppData\\Roaming\\npm\\npm.cmd", "C:\\Users\\%USERNAME%\\AppData\\Roaming\\npm\\npx.cmd"),
+        
+        // nvm安装路径
+        ("C:\\Users\\%USERNAME%\\AppData\\Roaming\\nvm\\nodejs\\node.exe", "C:\\Users\\%USERNAME%\\AppData\\Roaming\\nvm\\nodejs\\npm.cmd", "C:\\Users\\%USERNAME%\\AppData\\Roaming\\nvm\\nodejs\\npx.cmd"),
+        
+        // PATH中的命令（最后尝试）
+        ("node.exe", "npm.cmd", "npx.cmd"),
+        ("node", "npm", "npx"),
+    ];
+    
+    // macOS/Linux路径
+    #[cfg(not(target_os = "windows"))]
+    let potential_paths = vec![
+        // 标准安装路径
+        ("/usr/local/bin/node", "/usr/local/bin/npm", "/usr/local/bin/npx"),
+        ("/usr/bin/node", "/usr/bin/npm", "/usr/bin/npx"),
+        
+        // nvm安装路径
+        ("~/.nvm/versions/node/*/bin/node", "~/.nvm/versions/node/*/bin/npm", "~/.nvm/versions/node/*/bin/npx"),
+        
+        // Homebrew路径 (macOS)
+        ("/opt/homebrew/bin/node", "/opt/homebrew/bin/npm", "/opt/homebrew/bin/npx"),
+        
+        // PATH中的命令
+        ("node", "npm", "npx"),
     ];
     
     for (node_path, npm_path, npx_path) in potential_paths {
-        // 测试node命令
-        if let Ok(output) = std::process::Command::new(node_path).arg("--version").output() {
+        // 展开环境变量 (Windows)
+        #[cfg(target_os = "windows")]
+        let expanded_node_path = expand_env_vars(node_path);
+        #[cfg(target_os = "windows")]
+        let expanded_npm_path = expand_env_vars(npm_path);
+        #[cfg(target_os = "windows")]
+        let expanded_npx_path = expand_env_vars(npx_path);
+        
+        #[cfg(not(target_os = "windows"))]
+        let expanded_node_path = node_path.to_string();
+        #[cfg(not(target_os = "windows"))]
+        let expanded_npm_path = npm_path.to_string();
+        #[cfg(not(target_os = "windows"))]
+        let expanded_npx_path = npx_path.to_string();
+        
+        // 首先检查文件是否存在（绝对路径）
+        if Path::new(&expanded_node_path).exists() {
+            tracing::info!("找到Node.js路径: {}", expanded_node_path);
+            return (Some(expanded_node_path), Some(expanded_npm_path), Some(expanded_npx_path));
+        }
+        
+        // 然后尝试执行测试（PATH中的命令）
+        if let Ok(output) = std::process::Command::new(&expanded_node_path).arg("--version").output() {
             if output.status.success() {
-                return (Some(node_path.to_string()), Some(npm_path.to_string()), Some(npx_path.to_string()));
+                let version = String::from_utf8_lossy(&output.stdout);
+                tracing::info!("通过PATH找到Node.js: {} (版本: {})", expanded_node_path, version.trim());
+                return (Some(expanded_node_path), Some(expanded_npm_path), Some(expanded_npx_path));
             }
         }
     }
     
+    tracing::warn!("未找到任何可用的Node.js安装");
     (None, None, None)
+}
+
+// 展开Windows环境变量
+#[cfg(target_os = "windows")]
+fn expand_env_vars(path: &str) -> String {
+    if path.contains("%USERNAME%") {
+        if let Ok(username) = std::env::var("USERNAME") {
+            return path.replace("%USERNAME%", &username);
+        }
+    }
+    if path.contains("%USERPROFILE%") {
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            return path.replace("%USERPROFILE%", &userprofile);
+        }
+    }
+    if path.contains("%APPDATA%") {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return path.replace("%APPDATA%", &appdata);
+        }
+    }
+    path.to_string()
 }
 
 // 公开的环境检查函数，返回详细报告
@@ -589,6 +541,7 @@ pub async fn check_automation_environment_public() -> Result<String> {
 }
 
 // 清理临时文件
+#[allow(dead_code)]
 async fn cleanup_temp_files() {
     use std::fs;
     
@@ -611,6 +564,7 @@ async fn cleanup_temp_files() {
 }
 
 // 诊断Playwright错误
+#[allow(dead_code)]
 fn diagnose_playwright_error(error_output: &str, exit_code: Option<i32>) -> String {
     let error_lower = error_output.to_lowercase();
     
@@ -646,6 +600,7 @@ fn diagnose_playwright_error(error_output: &str, exit_code: Option<i32>) -> Stri
     )
 }
 
+#[allow(dead_code)]
 fn generate_playwright_script(
     profile: &crate::models::Profile,
     ip_asset: Option<&crate::models::IpAsset>,
@@ -1098,6 +1053,224 @@ fn generate_original_url_section(original_url: &Option<String>) -> String {
     }
 }
 
+// 生成简化的自动化脚本 - 用于备用方案
+fn generate_simple_automation_script(
+    profile: &crate::models::Profile,
+    ip_asset: Option<&crate::models::IpAsset>,
+    request: &AutomationRequest,
+) -> Result<String> {
+    let escaped_name = escape_js_string(&profile.name);
+    let escaped_phone = escape_js_string(&profile.phone);
+    let escaped_email = escape_js_string(&profile.email);
+    let escaped_infringing_url = escape_js_string(&request.infringing_url);
+    
+    let script = format!(r#"
+const {{ test, expect, chromium }} = require('@playwright/test');
+
+test('Bilibili Copyright Appeal - Simple Version', async () => {{
+    let browser = null;
+    let page = null;
+    
+    try {{
+        console.log('启动简化版Bilibili申诉自动化...');
+        
+        // 使用简单的浏览器启动
+        browser = await chromium.launch({{
+            headless: false,
+            channel: 'chrome'
+        }});
+        
+        const context = await browser.newContext();
+        page = await context.newPage();
+        
+        // 导航到申诉页面
+        console.log('正在打开Bilibili申诉页面...');
+        await page.goto('https://www.bilibili.com/v/copyright/apply?origin=home', {{
+            waitUntil: 'networkidle',
+            timeout: 60000
+        }});
+        
+        console.log('✓ 页面加载完成');
+        console.log('');
+        console.log('=== 请按照以下步骤手动完成申诉 ===');
+        console.log('');
+        console.log('第一步 - 资质认证:');
+        console.log('  姓名: {}');
+        console.log('  手机: {}');
+        console.log('  邮箱: {}');
+        console.log('  完成滑块验证和短信验证');
+        console.log('');
+        console.log('第二步 - 权益认证:');
+        {}
+        console.log('');
+        console.log('第三步 - 申诉请求:');
+        console.log('  侵权链接: {}');
+        console.log('  侵权描述: 该链接内容侵犯了我的著作权，未经许可使用我的原创作品');
+        {}
+        console.log('  勾选承诺并提交');
+        console.log('');
+        console.log('浏览器将保持打开状态，请手动完成上述步骤。');
+        
+        // 保持浏览器打开，等待用户手动操作
+        await page.waitForTimeout(300000); // 等待5分钟
+        
+    }} catch (error) {{
+        console.error('Simple automation error:', error);
+        throw error;
+    }} finally {{
+        // 不关闭浏览器，让用户继续操作
+        console.log('自动化脚本执行完成，浏览器保持打开状态');
+    }}
+}});
+"#, 
+        escaped_name, 
+        escaped_phone, 
+        escaped_email,
+        generate_simple_ip_asset_instructions(ip_asset),
+        escaped_infringing_url,
+        generate_simple_original_url_instructions(&request.original_url)
+    );
+    
+    Ok(script)
+}
+
+// 生成简化的IP资产说明
+fn generate_simple_ip_asset_instructions(ip_asset: Option<&crate::models::IpAsset>) -> String {
+    match ip_asset {
+        Some(asset) => {
+            format!(
+                "  权利人: {}\n  著作类型: {}\n  著作名称: {}\n  上传授权证明文件",
+                asset.owner, asset.work_type, asset.work_name
+            )
+        },
+        None => "  (跳过权益认证，直接进入下一步)".to_string()
+    }
+}
+
+// 生成简化的原创链接说明
+fn generate_simple_original_url_instructions(original_url: &Option<String>) -> String {
+    match original_url {
+        Some(url) => format!("  原创链接: {}", url),
+        None => "  (未提供原创链接)".to_string()
+    }
+}
+
+// 手动浏览器指导方案
+async fn run_manual_browser_guide(
+    profile: &crate::models::Profile,
+    ip_asset: Option<&crate::models::IpAsset>,
+    request: &AutomationRequest,
+) -> Result<()> {
+    use std::process::Command;
+    
+    tracing::info!("启动手动浏览器指导方案");
+    
+    // 尝试打开系统默认浏览器
+    let url = "https://www.bilibili.com/v/copyright/apply?origin=home";
+    
+    #[cfg(target_os = "windows")]
+    let browser_result = Command::new("cmd")
+        .args(&["/c", "start", url])
+        .spawn();
+    
+    #[cfg(target_os = "macos")]
+    let browser_result = Command::new("open")
+        .arg(url)
+        .spawn();
+    
+    #[cfg(target_os = "linux")]
+    let browser_result = Command::new("xdg-open")
+        .arg(url)
+        .spawn();
+    
+    match browser_result {
+        Ok(_) => {
+            update_status("浏览器已打开，请手动完成申诉", 70.0).await;
+            
+            // 生成详细的手动操作指南
+            let guide = generate_manual_operation_guide(profile, ip_asset, request);
+            
+            tracing::info!("手动操作指南:\n{}", guide);
+            
+            // 等待一段时间，让用户有时间完成操作
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            
+            update_status("请按照日志中的指南手动完成申诉", 90.0).await;
+            
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("无法打开系统浏览器: {}", e);
+            Err(anyhow::anyhow!("无法打开浏览器进行手动操作: {}", e))
+        }
+    }
+}
+
+// 生成详细的手动操作指南
+fn generate_manual_operation_guide(
+    profile: &crate::models::Profile,
+    ip_asset: Option<&crate::models::IpAsset>,
+    request: &AutomationRequest,
+) -> String {
+    let mut guide = vec![];
+    
+    guide.push("📋 Bilibili版权申诉手动操作指南".to_string());
+    guide.push("".to_string());
+    guide.push("📍 申诉网址: https://www.bilibili.com/v/copyright/apply?origin=home".to_string());
+    guide.push("".to_string());
+    
+    guide.push("第一步：资质认证".to_string());
+    guide.push("─────────────────".to_string());
+    guide.push(format!("• 姓名: {}", profile.name));
+    guide.push(format!("• 手机号: {}", profile.phone));
+    guide.push(format!("• 邮箱: {}", profile.email));
+    guide.push(format!("• 证件号码: {}", profile.id_card_number));
+    guide.push("• 上传身份证件照片".to_string());
+    guide.push("• 完成滑块验证".to_string());
+    guide.push("• 获取并输入短信验证码".to_string());
+    guide.push("• 点击'下一步'".to_string());
+    guide.push("".to_string());
+    
+    guide.push("第二步：权益认证".to_string());
+    guide.push("─────────────────".to_string());
+    match ip_asset {
+        Some(asset) => {
+            guide.push(format!("• 权利人: {}", asset.owner));
+            guide.push(format!("• 著作类型: {}", asset.work_type));
+            guide.push(format!("• 著作名称: {}", asset.work_name));
+            guide.push(format!("• 著作期限: {} 至 {}", asset.work_start_date, asset.work_end_date));
+            if let (Some(auth_start), Some(auth_end)) = (&asset.auth_start_date, &asset.auth_end_date) {
+                guide.push(format!("• 授权期限: {} 至 {}", auth_start, auth_end));
+            }
+            guide.push("• 上传授权证明文件".to_string());
+            guide.push("• 上传著作权证明文件".to_string());
+        }
+        None => {
+            guide.push("• (无IP资产数据，请根据实际情况填写)".to_string());
+        }
+    }
+    guide.push("• 点击'下一步'".to_string());
+    guide.push("".to_string());
+    
+    guide.push("第三步：申诉请求".to_string());
+    guide.push("─────────────────".to_string());
+    guide.push(format!("• 侵权链接: {}", request.infringing_url));
+    if let Some(original_url) = &request.original_url {
+        guide.push(format!("• 原创链接: {}", original_url));
+    }
+    guide.push("• 侵权描述: 该链接内容全部或部分侵犯了我的著作权，未经我的许可擅自使用了我的原创作品，请依法删除侵权内容。".to_string());
+    guide.push("• 勾选'本人保证'承诺".to_string());
+    guide.push("• 点击'提交'完成申诉".to_string());
+    guide.push("".to_string());
+    
+    guide.push("💡 温馨提示：".to_string());
+    guide.push("• 请确保所有信息准确无误".to_string());
+    guide.push("• 文件上传支持JPG、PNG、PDF等格式".to_string());
+    guide.push("• 如有疑问，请参考Bilibili官方申诉指南".to_string());
+    
+    guide.join("\n")
+}
+
 async fn save_case_record(request: &AutomationRequest) -> Result<()> {
     use chrono::Utc;
     
@@ -1127,4 +1300,464 @@ pub async fn continue_after_verification() -> Result<()> {
     *verification = true;
     tracing::info!("Verification completed signal sent to Playwright");
     Ok(())
+}
+
+// Windows直接启动Chrome浏览器
+async fn start_chrome_with_remote_debugging() -> Result<()> {
+    use std::process::Command;
+    
+    // Chrome可能的安装路径
+    let chrome_paths = vec![
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ];
+    
+    for chrome_path in chrome_paths {
+        if std::path::Path::new(chrome_path).exists() {
+            tracing::info!("找到Chrome浏览器: {}", chrome_path);
+            
+            // 启动Chrome，开启远程调试端口
+            let result = Command::new(chrome_path)
+                .args(&[
+                    "--remote-debugging-port=9222",
+                    "--user-data-dir=temp-chrome-profile",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "https://www.bilibili.com/v/copyright/apply?origin=home"
+                ])
+                .spawn();
+                
+            match result {
+                Ok(_) => {
+                    tracing::info!("✓ Chrome浏览器启动成功，远程调试端口: 9222");
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::warn!("Chrome启动失败: {}", e);
+                    continue;
+                }
+            }
+        }
+    }
+    
+    Err(anyhow::anyhow!("无法找到或启动Chrome浏览器"))
+}
+
+// 生成连接已有浏览器的Playwright脚本 - 完整的三步流程
+fn generate_connect_script(
+    profile: &crate::models::Profile,
+    ip_asset: Option<&crate::models::IpAsset>,
+    request: &AutomationRequest,
+) -> Result<String> {
+    let escaped_name = escape_js_string(&profile.name);
+    let escaped_phone = escape_js_string(&profile.phone);
+    let escaped_email = escape_js_string(&profile.email);
+    let escaped_id_card = escape_js_string(&profile.id_card_number);
+    let escaped_infringing_url = escape_js_string(&request.infringing_url);
+    
+    // 生成IP资产相关字段
+    let ip_asset_section = generate_ip_asset_section(ip_asset);
+    let original_url_section = generate_original_url_section(&request.original_url);
+    
+    let script = format!(r#"
+const {{ test, expect, chromium }} = require('@playwright/test');
+const fs = require('fs');
+
+test('Bilibili Copyright Appeal Automation - Connect Mode', async () => {{
+    let browser = null;
+    let context = null;
+    let page = null;
+    
+    try {{
+        console.log('连接到已运行的Chrome浏览器...');
+        
+        // 连接到远程调试端口
+        browser = await chromium.connectOverCDP('http://localhost:9222');
+        console.log('✓ 成功连接到Chrome浏览器');
+        
+        // 获取已有的上下文和页面
+        const contexts = browser.contexts();
+        if (contexts.length > 0) {{
+            context = contexts[0];
+            const pages = context.pages();
+            if (pages.length > 0) {{
+                page = pages[0];
+            }} else {{
+                page = await context.newPage();
+            }}
+        }} else {{
+            context = await browser.newContext();
+            page = await context.newPage();
+        }}
+        
+        console.log('✓ 获取到页面，开始Bilibili申诉自动化...');
+        
+        // 确保在正确的页面上
+        await page.goto('https://www.bilibili.com/v/copyright/apply?origin=home', {{
+            waitUntil: 'networkidle',
+            timeout: 60000
+        }});
+        
+        // 等待页面加载完成
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(3000);
+        
+        // 调试信息 - 检查页面元素
+        console.log('=== 页面调试信息 ===');
+        const allInputs = await page.locator('input').count();
+        console.log(`页面总输入框数量: ${{allInputs}}`);
+        
+        const nameInputs = await page.locator('input[placeholder="真实姓名"]').count();
+        console.log(`"真实姓名"输入框数量: ${{nameInputs}}`);
+        
+        const phoneInputs = await page.locator('input[placeholder="手机号"]').count();
+        console.log(`"手机号"输入框数量: ${{phoneInputs}}`);
+        
+        // 打印所有placeholder属性
+        const placeholders = await page.locator('input').evaluateAll(inputs => 
+            inputs.map(input => input.placeholder).filter(p => p)
+        );
+        console.log('所有输入框placeholder:', placeholders);
+        
+        // =========================
+        // 第一步: 资质认证
+        // =========================
+        console.log('Step 1: 资质认证');
+        
+        // 姓名: 填入真实姓名 - 使用更精确的选择器
+        console.log('Filling name...');
+        await page.waitForTimeout(1000);
+        const nameInput = page.locator('input[placeholder="真实姓名"].el-input__inner');
+        await nameInput.waitFor({{ timeout: 15000 }});
+        await nameInput.click(); // 先点击确保聚焦
+        await nameInput.fill('{}');
+        console.log('✓ Name filled');
+        
+        // 手机号
+        console.log('Filling phone...');
+        await page.waitForTimeout(1000);
+        const phoneInput = page.locator('input[placeholder="手机号"].el-input__inner');
+        await phoneInput.waitFor({{ timeout: 15000 }});
+        await phoneInput.click();
+        await phoneInput.fill('{}');
+        console.log('✓ Phone filled');
+        
+        // 邮箱 - 尝试多种选择器
+        console.log('Filling email...');
+        await page.waitForTimeout(1000);
+        let emailInput = page.locator('input[placeholder*="邮箱"].el-input__inner').first();
+        if (await emailInput.count() === 0) {{
+            emailInput = page.locator('.el-form-item:has-text("邮箱") input.el-input__inner');
+        }}
+        if (await emailInput.count() === 0) {{
+            emailInput = page.locator('input[type="text"]').nth(2); // 第三个文本输入框通常是邮箱
+        }}
+        await emailInput.waitFor({{ timeout: 15000 }});
+        await emailInput.click();
+        await emailInput.fill('{}');
+        console.log('✓ Email filled');
+        
+        // 身份认证 - 证件号码
+        console.log('Filling ID card number...');
+        await page.waitForTimeout(1000);
+        let idInput = page.locator('input[placeholder="证件号码"].el-input__inner');
+        if (await idInput.count() === 0) {{
+            idInput = page.locator('input[placeholder*="身份证"].el-input__inner');
+        }}
+        if (await idInput.count() === 0) {{
+            idInput = page.locator('.el-form-item:has-text("身份") input.el-input__inner');
+        }}
+        await idInput.waitFor({{ timeout: 15000 }});
+        await idInput.click();
+        await idInput.fill('{}');
+        console.log('✓ ID card number filled');
+        
+        // 证件证明文件上传
+        const idCardFiles = {};
+        if (idCardFiles && Array.isArray(idCardFiles) && idCardFiles.length > 0) {{
+            console.log('Uploading ID card files...');
+            try {{
+                const idFileInput = page.locator('.el-form-item:has-text("证件证明") input[type="file"]');
+                await idFileInput.waitFor({{ timeout: 10000 }});
+                
+                // 检查文件是否存在
+                const validIdFiles = [];
+                for (const filePath of idCardFiles) {{
+                    if (fs.existsSync(filePath)) {{
+                        validIdFiles.push(filePath);
+                    }} else {{
+                        console.warn(`ID card file not found: ${{filePath}}`);
+                    }}
+                }}
+                
+                if (validIdFiles.length > 0) {{
+                    await idFileInput.setInputFiles(validIdFiles);
+                    console.log(`Uploaded ${{validIdFiles.length}} ID card files`);
+                }}
+            }} catch (uploadError) {{
+                console.error('Error uploading ID card files:', uploadError);
+                // 继续执行，不中断流程
+            }}
+        }}
+        
+        console.log('✓ 资质认证信息填写完成');
+        
+        // 创建等待验证信号文件
+        fs.writeFileSync('waiting_for_verification.txt', 'waiting');
+        console.log('⚠️  等待人工验证: 请手动完成滑块验证，获取并输入短信验证码');
+        console.log('⚠️  完成验证后，请在桌面应用中点击"我已完成验证"按钮');
+        
+        // 等待验证完成信号
+        while (true) {{
+            await page.waitForTimeout(2000);
+            if (fs.existsSync('verification_completed.txt')) {{
+                console.log('✓ 收到验证完成信号，继续流程');
+                fs.unlinkSync('verification_completed.txt');
+                fs.unlinkSync('waiting_for_verification.txt');
+                break;
+            }}
+        }}
+        
+        // 点击下一步
+        console.log('Clicking next step...');
+        const nextButton1 = page.locator('button:has-text("下一步")');
+        await nextButton1.waitFor({{ timeout: 10000 }});
+        await nextButton1.click();
+        await page.waitForTimeout(2000);
+        
+        // =========================
+        // 第二步: 权益认证
+        // =========================
+        console.log('Step 2: 权益认证');
+        
+        {}
+        
+        // 点击下一步
+        console.log('Clicking next step...');
+        const nextButton2 = page.locator('button:has-text("下一步")');
+        await nextButton2.waitFor({{ timeout: 10000 }});
+        await nextButton2.click();
+        await page.waitForTimeout(2000);
+        
+        // =========================
+        // 第三步: 申诉请求
+        // =========================
+        console.log('Step 3: 申诉请求');
+        
+        // 侵权链接
+        console.log('Filling infringing URL...');
+        const infringingUrlInput = page.locator('input[placeholder*="他人发布的B站侵权链接"]');
+        await infringingUrlInput.waitFor({{ timeout: 10000 }});
+        await infringingUrlInput.fill('{}');
+        
+        // 侵权描述
+        console.log('Filling infringement description...');
+        const descriptionInput = page.locator('textarea[placeholder*="该链接内容全部"]');
+        await descriptionInput.waitFor({{ timeout: 10000 }});
+        const defaultDescription = "该链接内容全部或部分侵犯了我的版权，未经我的授权擅自使用我的原创作品，构成版权侵权。请及时处理。";
+        await descriptionInput.fill(defaultDescription);
+        
+        {}
+        
+        // 勾选承诺
+        console.log('Checking promise checkbox...');
+        const promiseCheckbox = page.locator('.el-checkbox__label:has-text("本人保证")');
+        await promiseCheckbox.waitFor({{ timeout: 10000 }});
+        await promiseCheckbox.click();
+        
+        console.log('✓ 申诉信息填写完成');
+        console.log('⚠️  请手动检查信息并点击"提交"按钮完成申诉');
+        
+        // 保持浏览器打开，让用户手动提交
+        console.log('保持浏览器打开状态，等待用户手动提交...');
+        
+    }} catch (error) {{
+        console.error('自动化过程中出错:', error);
+        // 清理信号文件
+        try {{
+            if (fs.existsSync('waiting_for_verification.txt')) {{
+                fs.unlinkSync('waiting_for_verification.txt');
+            }}
+        }} catch (e) {{
+            // 忽略清理错误
+        }}
+        throw error;
+    }} finally {{
+        // 不关闭浏览器，让用户继续操作
+        console.log('Playwright脚本执行完成，浏览器保持打开状态');
+    }}
+}});
+"#, 
+        escaped_name, 
+        escaped_phone, 
+        escaped_email, 
+        escaped_id_card,
+        format_file_paths(&profile.id_card_files),
+        ip_asset_section,
+        escaped_infringing_url,
+        original_url_section
+    );
+    
+    Ok(script)
+}
+
+// 改进的Playwright执行，使用多重路径查找策略
+async fn execute_simple_playwright(script_path: &str) -> Result<()> {
+    use std::process::Command;
+    
+    tracing::info!("开始执行Playwright脚本: {}", script_path);
+    
+    // 策略1: 使用智能路径查找
+    let (_, _, npx_path) = find_nodejs_paths();
+    
+    if let Some(npx) = npx_path {
+        tracing::info!("使用找到的npx路径: {}", npx);
+        
+        let result = Command::new(&npx)
+            .args(&["playwright", "test", script_path, "--headed"])
+            .current_dir(".")
+            .output();
+            
+        match result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                
+                tracing::info!("Playwright stdout: {}", stdout);
+                if !stderr.is_empty() {
+                    tracing::warn!("Playwright stderr: {}", stderr);
+                }
+                
+                if output.status.success() {
+                    tracing::info!("✓ Playwright脚本执行成功");
+                    return Ok(());
+                } else {
+                    tracing::error!("✗ Playwright执行失败，退出代码: {:?}", output.status.code());
+                    return Err(anyhow::anyhow!("Playwright执行失败: {}", stderr));
+                }
+            }
+            Err(e) => {
+                tracing::error!("✗ 无法执行npx命令 ({}): {}", npx, e);
+                // 继续尝试其他策略
+            }
+        }
+    }
+    
+    // 策略2: 尝试直接使用系统PATH中的npx
+    tracing::info!("尝试使用系统PATH中的npx");
+    let result = Command::new("npx")
+        .args(&["playwright", "test", script_path, "--headed"])
+        .current_dir(".")
+        .output();
+        
+    match result {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                tracing::info!("✓ 使用系统PATH的npx执行成功: {}", stdout);
+                return Ok(());
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::error!("✗ 系统PATH npx执行失败: {}", stderr);
+            }
+        }
+        Err(e) => {
+            tracing::error!("✗ 系统PATH npx不可用: {}", e);
+        }
+    }
+    
+    // 策略3: 尝试通过npm直接运行
+    tracing::info!("尝试通过npm运行Playwright");
+    let (_, npm_path, _) = find_nodejs_paths();
+    
+    if let Some(npm) = npm_path {
+        let result = Command::new(&npm)
+            .args(&["exec", "playwright", "test", script_path, "--headed"])
+            .current_dir(".")
+            .output();
+            
+        match result {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    tracing::info!("✓ 使用npm exec执行成功: {}", stdout);
+                    return Ok(());
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!("✗ npm exec执行失败: {}", stderr);
+                }
+            }
+            Err(e) => {
+                tracing::error!("✗ npm exec不可用: {}", e);
+            }
+        }
+    }
+    
+    // 所有策略都失败
+    Err(anyhow::anyhow!(
+        "无法执行Playwright: 尝试了多种npx路径策略但都失败了。\n建议:\n1. 确认Node.js已正确安装\n2. 运行 'npm install @playwright/test'\n3. 运行 'npx playwright install'"
+    ))
+}
+
+// 备用方案：简化的浏览器自动化流程
+async fn run_browser_automation_fallback(
+    profile: &crate::models::Profile,
+    ip_asset: Option<&crate::models::IpAsset>,
+    request: &AutomationRequest,
+) -> Result<()> {
+    tracing::info!("启动备用的浏览器自动化方案");
+    
+    // 备用策略1: 生成更简单的Playwright脚本
+    update_status("生成简化的自动化脚本...", 35.0).await;
+    
+    let simple_script = generate_simple_automation_script(profile, ip_asset, request)?;
+    let script_path = "temp_simple_automation.spec.js";
+    
+    // 写入简化脚本
+    use std::fs;
+    fs::write(script_path, &simple_script)
+        .map_err(|e| anyhow::anyhow!("简化脚本文件写入失败: {}", e))?;
+    
+    update_status("执行简化的自动化脚本...", 45.0).await;
+    
+    // 尝试执行简化脚本
+    let simple_result = execute_simple_playwright(script_path).await;
+    
+    // 清理临时文件
+    let _ = fs::remove_file(script_path);
+    
+    match simple_result {
+        Ok(_) => {
+            tracing::info!("✓ 备用方案执行成功");
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!("备用方案1失败: {}", e);
+        }
+    }
+    
+    // 备用策略2: 系统浏览器打开 + 手动操作指导
+    update_status("启动系统浏览器，提供手动操作指导...", 55.0).await;
+    
+    let manual_result = run_manual_browser_guide(profile, ip_asset, request).await;
+    
+    match manual_result {
+        Ok(_) => {
+            tracing::info!("✓ 手动指导方案执行成功");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("✗ 所有备用方案都失败: {}", e);
+            Err(anyhow::anyhow!(
+                "自动化执行失败，建议:\n\
+                1. 手动访问: https://www.bilibili.com/v/copyright/apply\n\
+                2. 填写个人信息: {} / {} / {}\n\
+                3. 填写申诉链接: {}\n\
+                4. 检查Node.js和Playwright安装是否正确\n\
+                原因: {}", 
+                profile.name, profile.phone, profile.email, 
+                request.infringing_url, e
+            ))
+        }
+    }
 }
