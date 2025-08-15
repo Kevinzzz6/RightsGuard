@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, ConnectOptions, sqlite::SqliteConnectOptions};
 use uuid::Uuid;
 use chrono::Utc;
 use anyhow::{Result, Context};
@@ -8,12 +8,13 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 use tauri::Manager;
+use std::str::FromStr;
 
 // Global database URL storage with thread safety
 static DATABASE_URL: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 // Store app handle for path resolution
-static APP_HANDLE: Lazy<Arc<Mutex<Option<tauri::AppHandle>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+pub static APP_HANDLE: Lazy<Arc<Mutex<Option<tauri::AppHandle>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the database system with the app handle
 /// This must be called once during app setup before any database operations
@@ -74,40 +75,157 @@ fn get_database_path() -> Result<PathBuf> {
     Ok(db_path)
 }
 
-/// Get the database URL, initializing it if necessary
-fn get_database_url() -> Result<String> {
-    let mut url_guard = DATABASE_URL.lock().unwrap();
-    
-    if let Some(ref url) = *url_guard {
-        return Ok(url.clone());
-    }
-    
+/// Get the database path and create the file if it doesn't exist
+/// This ensures the SQLite database file exists before connection attempts
+fn get_database_path_with_creation() -> Result<PathBuf> {
     let db_path = get_database_path()
         .context("Failed to resolve database path")?;
     
-    // Convert path to proper SQLite URL format for Windows
-    let path_str = db_path.to_string_lossy().replace("\\", "/");
-    let db_url = format!("sqlite:{}", path_str);
-    
-    // Additional path validation
-    tracing::info!("Database file path: {:?}", db_path);
-    tracing::info!("Database URL: {}", db_url);
-    tracing::info!("Parent directory exists: {}", db_path.parent().map_or(false, |p| p.exists()));
-    tracing::info!("Database file exists: {}", db_path.exists());
-    
-    // Ensure parent directory exists
+    // Ensure parent directory exists with proper permissions
     if let Some(parent_dir) = db_path.parent() {
         if !parent_dir.exists() {
             fs::create_dir_all(parent_dir)
                 .with_context(|| format!("Failed to create parent directory: {:?}", parent_dir))?;
             tracing::info!("Created parent directory: {:?}", parent_dir);
         }
+        
+        // Verify parent directory is writable
+        let test_file = parent_dir.join(".write_test");
+        match fs::write(&test_file, "test") {
+            Ok(_) => {
+                let _ = fs::remove_file(&test_file); // Clean up test file
+                tracing::info!("Parent directory is writable: {:?}", parent_dir);
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Parent directory is not writable: {:?}, error: {}", 
+                    parent_dir, e
+                ));
+            }
+        }
     }
     
-    *url_guard = Some(db_url.clone());
+    // Create the database file if it doesn't exist
+    if !db_path.exists() {
+        match fs::File::create(&db_path) {
+            Ok(_) => {
+                tracing::info!("Created database file: {:?}", db_path);
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to create database file: {:?}, error: {}", 
+                    db_path, e
+                ));
+            }
+        }
+    }
     
-    tracing::info!("Database URL initialized: {}", db_url);
-    Ok(db_url)
+    tracing::info!("Database file verified: {:?}", db_path);
+    Ok(db_path)
+}
+
+/// Create SQLite connection options with proper configuration
+/// This handles Windows-specific path issues and SQLite connection parameters
+pub fn create_sqlite_options(db_path: &PathBuf) -> Result<SqliteConnectOptions> {
+    // Convert Windows path to proper format for SQLite
+    let path_str = if cfg!(windows) {
+        // On Windows, use the raw path directly
+        db_path.to_string_lossy().to_string()
+    } else {
+        // On Unix-like systems, convert backslashes to forward slashes
+        db_path.to_string_lossy().replace("\\", "/")
+    };
+    
+    tracing::info!("Creating SQLite connection options for path: {}", path_str);
+    
+    let options = SqliteConnectOptions::from_str(&path_str)
+        .with_context(|| format!("Failed to create SQLite options for path: {}", path_str))?
+        .create_if_missing(true)  // Automatically create database if it doesn't exist
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)  // Use WAL mode for better concurrency
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)  // Balanced safety/performance
+        .foreign_keys(true)  // Enable foreign key constraints
+        .busy_timeout(std::time::Duration::from_secs(30));  // 30 second timeout for locked database
+    
+    tracing::info!("SQLite connection options created successfully");
+    Ok(options)
+}
+
+/// Fallback connection method using simpler SQLite options
+/// This is used when the primary connection method fails
+async fn try_fallback_connection(db_path: &PathBuf) -> Result<SqlitePool> {
+    tracing::info!("Attempting fallback SQLite connection");
+    
+    // Strategy 1: Try with minimal options
+    tracing::info!("Fallback strategy 1: Minimal options");
+    let simple_options = SqliteConnectOptions::from_str(&db_path.to_string_lossy())
+        .with_context(|| format!("Failed to create simple SQLite options for: {:?}", db_path))?
+        .create_if_missing(true);
+    
+    match SqlitePool::connect_with(simple_options).await {
+        Ok(pool) => {
+            tracing::info!("Fallback strategy 1 successful");
+            return Ok(pool);
+        }
+        Err(e) => {
+            tracing::warn!("Fallback strategy 1 failed: {}", e);
+        }
+    }
+    
+    // Strategy 2: Try with URI format and absolute path
+    tracing::info!("Fallback strategy 2: URI format");
+    let uri_path = if cfg!(windows) {
+        format!("file:///{}?cache=shared&mode=rwc", db_path.to_string_lossy().replace("\\", "/"))
+    } else {
+        format!("file://{}?cache=shared&mode=rwc", db_path.to_string_lossy())
+    };
+    
+    let uri_options = SqliteConnectOptions::from_str(&uri_path)
+        .with_context(|| format!("Failed to create URI SQLite options: {}", uri_path))?;
+    
+    match SqlitePool::connect_with(uri_options).await {
+        Ok(pool) => {
+            tracing::info!("Fallback strategy 2 successful");
+            return Ok(pool);
+        }
+        Err(e) => {
+            tracing::warn!("Fallback strategy 2 failed: {}", e);
+        }
+    }
+    
+    // Strategy 3: Try with legacy string format
+    tracing::info!("Fallback strategy 3: Legacy connection string");
+    let legacy_url = format!("sqlite:{}", db_path.to_string_lossy());
+    
+    match SqlitePool::connect(&legacy_url).await {
+        Ok(pool) => {
+            tracing::info!("Fallback strategy 3 successful");
+            return Ok(pool);
+        }
+        Err(e) => {
+            tracing::warn!("Fallback strategy 3 failed: {}", e);
+        }
+    }
+    
+    // Strategy 4: Try with in-memory fallback for testing
+    tracing::warn!("All file-based connections failed, trying in-memory database for testing");
+    let memory_options = SqliteConnectOptions::from_str("sqlite::memory:")
+        .with_context(|| "Failed to create in-memory SQLite options")?
+        .create_if_missing(true);
+    
+    match SqlitePool::connect_with(memory_options).await {
+        Ok(pool) => {
+            tracing::warn!("Using in-memory database - data will not persist!");
+            return Ok(pool);
+        }
+        Err(e) => {
+            tracing::error!("Even in-memory connection failed: {}", e);
+        }
+    }
+    
+    Err(anyhow::anyhow!(
+        "All fallback connection strategies failed for database path: {:?}", 
+        db_path
+    ))
 }
 
 /// Initialize the database with proper error handling and logging
@@ -115,33 +233,63 @@ fn get_database_url() -> Result<String> {
 pub async fn init_database() -> Result<()> {
     tracing::info!("Starting database initialization...");
     
-    let database_url = get_database_url()
-        .context("Failed to determine database URL")?;
+    // Step 1: Get database path and ensure file exists
+    let db_path = get_database_path_with_creation()
+        .context("Failed to prepare database file")?;
     
-    tracing::info!("Attempting to connect to database: {}", database_url);
+    tracing::info!("Database file prepared at: {:?}", db_path);
     
-    // Try connecting with detailed error information
-    let pool = match SqlitePool::connect(&database_url).await {
+    // Step 2: Create proper SQLite connection options
+    let sqlite_options = create_sqlite_options(&db_path)
+        .context("Failed to create SQLite connection options")?;
+    
+    tracing::info!("SQLite connection options configured");
+    
+    // Step 3: Attempt connection with detailed error information
+    let pool = match SqlitePool::connect_with(sqlite_options).await {
         Ok(pool) => {
             tracing::info!("Database connection established successfully");
             pool
         }
         Err(e) => {
             tracing::error!("SQLite connection failed. Error: {:?}", e);
-            tracing::error!("Connection string was: {}", database_url);
+            tracing::error!("Database file path: {:?}", db_path);
+            tracing::error!("File exists: {}", db_path.exists());
             
             // Additional diagnostic information
-            if let Ok(db_path) = get_database_path() {
-                tracing::error!("Database file path: {:?}", db_path);
-                tracing::error!("File exists: {}", db_path.exists());
-                if let Some(parent) = db_path.parent() {
-                    tracing::error!("Parent directory: {:?}", parent);
-                    tracing::error!("Parent exists: {}", parent.exists());
-                    tracing::error!("Parent permissions: {:?}", std::fs::metadata(parent));
+            if let Some(parent) = db_path.parent() {
+                tracing::error!("Parent directory: {:?}", parent);
+                tracing::error!("Parent exists: {}", parent.exists());
+                match std::fs::metadata(parent) {
+                    Ok(metadata) => {
+                        tracing::error!("Parent permissions - readonly: {}", metadata.permissions().readonly());
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            tracing::error!("Parent permissions mode: {:o}", metadata.permissions().mode());
+                        }
+                    }
+                    Err(perm_err) => {
+                        tracing::error!("Failed to get parent permissions: {}", perm_err);
+                    }
                 }
             }
             
-            return Err(anyhow::anyhow!("Failed to connect to database: {}", e));
+            // Try with simpler connection as fallback
+            tracing::warn!("Attempting fallback connection method...");
+            match try_fallback_connection(&db_path).await {
+                Ok(fallback_pool) => {
+                    tracing::info!("Fallback connection successful");
+                    fallback_pool
+                }
+                Err(fallback_err) => {
+                    tracing::error!("Fallback connection also failed: {:?}", fallback_err);
+                    return Err(anyhow::anyhow!(
+                        "Database initialization failed: {}\nFallback also failed: {}", 
+                        e, fallback_err
+                    ));
+                }
+            }
         }
     };
     
@@ -243,13 +391,33 @@ pub async fn init_database() -> Result<()> {
 }
 
 pub async fn get_pool() -> Result<SqlitePool> {
-    let database_url = get_database_url()
-        .context("Failed to determine database URL for pool creation")?;
+    tracing::debug!("Creating new database pool");
     
-    tracing::debug!("Creating new database pool for: {}", database_url);
+    // Use the same robust connection method as init_database
+    let db_path = get_database_path_with_creation()
+        .context("Failed to prepare database file for pool creation")?;
     
-    SqlitePool::connect(&database_url).await
-        .with_context(|| format!("Failed to create database pool: {}", database_url))
+    // Try primary connection method first
+    match create_sqlite_options(&db_path) {
+        Ok(options) => {
+            match SqlitePool::connect_with(options).await {
+                Ok(pool) => {
+                    tracing::debug!("Database pool created successfully");
+                    return Ok(pool);
+                }
+                Err(e) => {
+                    tracing::warn!("Primary pool connection failed, trying fallback: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to create SQLite options, trying fallback: {}", e);
+        }
+    }
+    
+    // Use fallback connection method
+    try_fallback_connection(&db_path)
+        .context("Both primary and fallback pool connections failed")
 }
 
 // 个人档案相关操作
@@ -512,8 +680,8 @@ pub async fn get_database_info() -> Result<String> {
         return Ok(info.join("\n"));
     }
     
-    // Database path resolution
-    match get_database_path() {
+    // Database path resolution with file creation
+    match get_database_path_with_creation() {
         Ok(path) => {
             info.push(format!("✓ Database path: {:?}", path));
             info.push(format!("✓ Path exists: {}", path.exists()));
@@ -521,20 +689,53 @@ pub async fn get_database_info() -> Result<String> {
             if let Some(parent) = path.parent() {
                 info.push(format!("✓ Parent directory: {:?}", parent));
                 info.push(format!("✓ Parent exists: {}", parent.exists()));
+                
+                // Check parent directory permissions
+                match std::fs::metadata(parent) {
+                    Ok(metadata) => {
+                        info.push(format!("✓ Parent readonly: {}", metadata.permissions().readonly()));
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            info.push(format!("✓ Parent permissions: {:o}", metadata.permissions().mode()));
+                        }
+                    }
+                    Err(e) => {
+                        info.push(format!("✗ Failed to get parent metadata: {}", e));
+                    }
+                }
+            }
+            
+            // Check database file permissions
+            match std::fs::metadata(&path) {
+                Ok(metadata) => {
+                    info.push(format!("✓ Database file size: {} bytes", metadata.len()));
+                    info.push(format!("✓ Database readonly: {}", metadata.permissions().readonly()));
+                }
+                Err(e) => {
+                    info.push(format!("✗ Failed to get database metadata: {}", e));
+                }
             }
         }
         Err(e) => {
-            info.push(format!("✗ Failed to resolve database path: {}", e));
+            info.push(format!("✗ Failed to resolve/create database path: {}", e));
         }
     }
     
-    // Database URL
-    match get_database_url() {
-        Ok(url) => {
-            info.push(format!("✓ Database URL: {}", url));
+    // SQLite connection options test
+    match get_database_path_with_creation() {
+        Ok(path) => {
+            match create_sqlite_options(&path) {
+                Ok(_options) => {
+                    info.push("✓ SQLite connection options created successfully".to_string());
+                }
+                Err(e) => {
+                    info.push(format!("✗ Failed to create SQLite options: {}", e));
+                }
+            }
         }
-        Err(e) => {
-            info.push(format!("✗ Failed to get database URL: {}", e));
+        Err(_) => {
+            info.push("✗ Cannot test SQLite options without valid path".to_string());
         }
     }
     

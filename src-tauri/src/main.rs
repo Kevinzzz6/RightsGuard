@@ -120,6 +120,7 @@ fn main() {
             
             // 调试命令
             test_database,
+            test_sqlite_connection_strategies,
             get_database_diagnostics,
             clear_database_cache
         ])

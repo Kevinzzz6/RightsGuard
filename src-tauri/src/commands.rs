@@ -3,6 +3,9 @@ use uuid::Uuid;
 use crate::database;
 use crate::automation;
 use crate::models::{Profile, IpAsset, Case, AutomationRequest, FileSelection, AutomationStatus};
+use std::path::PathBuf;
+use std::fs;
+use std::str::FromStr;
 
 // A serializable error type for Tauri commands
 #[derive(Debug, thiserror::Error, Serialize)]
@@ -202,11 +205,88 @@ pub async fn show_message(title: String, message: String, app: tauri::AppHandle)
     Ok(())
 }
 
-// Database test command
+// Helper function to test file system operations
+async fn test_file_system_operations() -> Result<Vec<String>, anyhow::Error> {
+    let mut results = Vec::new();
+    
+    // Test app data directory access
+    if let Ok(app_handle_guard) = database::APP_HANDLE.lock() {
+        if let Some(handle) = app_handle_guard.as_ref() {
+            let app_data_dir = handle.path().app_data_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get app data directory: {}", e))?;
+            
+            results.push(format!("✓ App data directory: {:?}", app_data_dir));
+            results.push(format!("✓ App data exists: {}", app_data_dir.exists()));
+            
+            // Test creating the data subdirectory
+            let data_dir = app_data_dir.join("data");
+            if !data_dir.exists() {
+                fs::create_dir_all(&data_dir)
+                    .map_err(|e| anyhow::anyhow!("Failed to create data directory: {}", e))?;
+                results.push(format!("✓ Created data directory: {:?}", data_dir));
+            } else {
+                results.push(format!("✓ Data directory exists: {:?}", data_dir));
+            }
+            
+            // Test write permissions
+            let test_file = data_dir.join("write_test.tmp");
+            match fs::write(&test_file, "test content") {
+                Ok(_) => {
+                    results.push("✓ Write permission test passed".to_string());
+                    let _ = fs::remove_file(&test_file); // Clean up
+                }
+                Err(e) => {
+                    results.push(format!("✗ Write permission test failed: {}", e));
+                }
+            }
+            
+            // Test database file path
+            let db_file = data_dir.join("rights_guard.db");
+            results.push(format!("✓ Database file path: {:?}", db_file));
+            
+            // Check if database file exists and get its size
+            if db_file.exists() {
+                match fs::metadata(&db_file) {
+                    Ok(metadata) => {
+                        results.push(format!("✓ Database file size: {} bytes", metadata.len()));
+                        results.push(format!("✓ Database file readonly: {}", metadata.permissions().readonly()));
+                    }
+                    Err(e) => {
+                        results.push(format!("✗ Failed to get database metadata: {}", e));
+                    }
+                }
+            } else {
+                results.push("ℹ Database file does not exist yet".to_string());
+            }
+        } else {
+            return Err(anyhow::anyhow!("App handle not available"));
+        }
+    } else {
+        return Err(anyhow::anyhow!("Failed to access app handle"));
+    }
+    
+    Ok(results)
+}
+
+// Database test command with enhanced Windows compatibility testing
 #[tauri::command]
 pub async fn test_database() -> Result<String, CommandError> {
-    tracing::info!("Starting comprehensive database test");
+    tracing::info!("Starting comprehensive database test with Windows compatibility checks");
     let mut results = Vec::new();
+    
+    // Step 0: Test file system operations
+    tracing::info!("Step 0: Testing file system operations...");
+    match test_file_system_operations().await {
+        Ok(fs_results) => {
+            results.extend(fs_results);
+        }
+        Err(e) => {
+            let error_msg = format!("✗ File system test failed: {}", e);
+            tracing::error!("{}", error_msg);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    }
     
     // Step 1: Test database initialization
     tracing::info!("Step 1: Testing database initialization...");
@@ -219,7 +299,7 @@ pub async fn test_database() -> Result<String, CommandError> {
             let error_msg = format!("✗ Database initialization failed: {}", e);
             tracing::error!("{}", error_msg);
             results.push(error_msg);
-            return Ok(results.join("\n"));
+            // Continue with other tests to gather more information
         }
     }
     
@@ -324,7 +404,126 @@ pub async fn test_database() -> Result<String, CommandError> {
     }
     
     results.push("".to_string());
-    results.push("🎉 Database test completed successfully!".to_string());
+    results.push("🎉 Database test completed!".to_string());
+    Ok(results.join("\n"))
+}
+
+// Comprehensive SQLite connection test command
+#[tauri::command]
+pub async fn test_sqlite_connection_strategies() -> Result<String, CommandError> {
+    tracing::info!("Testing all SQLite connection strategies");
+    let mut results = Vec::new();
+    
+    // Get the database path
+    let db_path = match database::get_database_path() {
+        Ok(path) => {
+            results.push(format!("✓ Database path resolved: {:?}", path));
+            path
+        }
+        Err(e) => {
+            let error_msg = format!("✗ Failed to resolve database path: {}", e);
+            results.push(error_msg);
+            return Ok(results.join("\n"));
+        }
+    };
+    
+    // Test 1: File creation
+    results.push("\n--- Testing File Operations ---".to_string());
+    match std::fs::File::create(&db_path) {
+        Ok(_) => {
+            results.push("✓ Database file creation successful".to_string());
+        }
+        Err(e) => {
+            results.push(format!("✗ Database file creation failed: {}", e));
+        }
+    }
+    
+    // Test 2: Primary connection method
+    results.push("\n--- Testing Primary Connection Method ---".to_string());
+    match database::create_sqlite_options(&db_path) {
+        Ok(options) => {
+            results.push("✓ Primary SQLite options created".to_string());
+            match sqlx::SqlitePool::connect_with(options).await {
+                Ok(_pool) => {
+                    results.push("✓ Primary connection successful".to_string());
+                }
+                Err(e) => {
+                    results.push(format!("✗ Primary connection failed: {}", e));
+                }
+            }
+        }
+        Err(e) => {
+            results.push(format!("✗ Primary options creation failed: {}", e));
+        }
+    }
+    
+    // Test 3: Fallback strategies
+    results.push("\n--- Testing Fallback Strategies ---".to_string());
+    
+    // Strategy 1: Minimal options
+    let simple_options = sqlx::sqlite::SqliteConnectOptions::from_str(&db_path.to_string_lossy())
+        .map_err(|e| CommandError::Database(e.to_string()))?
+        .create_if_missing(true);
+    
+    match sqlx::SqlitePool::connect_with(simple_options).await {
+        Ok(_pool) => {
+            results.push("✓ Fallback strategy 1 (minimal) successful".to_string());
+        }
+        Err(e) => {
+            results.push(format!("✗ Fallback strategy 1 failed: {}", e));
+        }
+    }
+    
+    // Strategy 2: URI format
+    let uri_path = if cfg!(windows) {
+        format!("file:///{}?cache=shared&mode=rwc", db_path.to_string_lossy().replace("\\", "/"))
+    } else {
+        format!("file://{}?cache=shared&mode=rwc", db_path.to_string_lossy())
+    };
+    
+    match sqlx::sqlite::SqliteConnectOptions::from_str(&uri_path) {
+        Ok(uri_options) => {
+            match sqlx::SqlitePool::connect_with(uri_options).await {
+                Ok(_pool) => {
+                    results.push("✓ Fallback strategy 2 (URI) successful".to_string());
+                }
+                Err(e) => {
+                    results.push(format!("✗ Fallback strategy 2 failed: {}", e));
+                }
+            }
+        }
+        Err(e) => {
+            results.push(format!("✗ URI options creation failed: {}", e));
+        }
+    }
+    
+    // Strategy 3: Legacy connection string
+    let legacy_url = format!("sqlite:{}", db_path.to_string_lossy());
+    match sqlx::SqlitePool::connect(&legacy_url).await {
+        Ok(_pool) => {
+            results.push("✓ Fallback strategy 3 (legacy) successful".to_string());
+        }
+        Err(e) => {
+            results.push(format!("✗ Fallback strategy 3 failed: {}", e));
+        }
+    }
+    
+    // Test 4: In-memory fallback
+    results.push("\n--- Testing In-Memory Fallback ---".to_string());
+    let memory_options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+        .map_err(|e| CommandError::Database(e.to_string()))?
+        .create_if_missing(true);
+    
+    match sqlx::SqlitePool::connect_with(memory_options).await {
+        Ok(_pool) => {
+            results.push("✓ In-memory database connection successful".to_string());
+        }
+        Err(e) => {
+            results.push(format!("✗ In-memory connection failed: {}", e));
+        }
+    }
+    
+    results.push("\n🔍 SQLite connection strategy test completed!".to_string());
     Ok(results.join("\n"))
 }
 

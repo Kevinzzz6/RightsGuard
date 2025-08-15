@@ -630,6 +630,41 @@ class TauriAPI {
     }
   }
 
+  // SQLite connection strategy testing API
+  async testSqliteConnectionStrategies(): Promise<{ success: boolean; message: string }> {
+    console.log('[TauriAPI] testSqliteConnectionStrategies called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      // Mock test for web environment
+      console.log('[TauriAPI] Using mock SQLite connection test - not in Tauri environment');
+      return { success: true, message: 'Mock SQLite connection test successful (web environment)' };
+    }
+    
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for SQLite connection test...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling test_sqlite_connection_strategies command...');
+      const result = await invoke<string>('test_sqlite_connection_strategies');
+      console.log('[TauriAPI] SQLite connection test result (string):', result);
+      
+      // Backend returns string, convert to expected format
+      return { success: true, message: result };
+    } catch (error) {
+      console.error('[TauriAPI] Failed to test SQLite connection strategies:', error);
+      console.error('[TauriAPI] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        type: typeof error,
+        error
+      });
+      return { 
+        success: false, 
+        message: `SQLite connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      };
+    }
+  }
+
   // Diagnostic methods for debugging
   async getDiagnosticInfo(): Promise<{
     isTauri: boolean;
