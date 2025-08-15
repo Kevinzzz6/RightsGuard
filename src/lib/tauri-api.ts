@@ -472,6 +472,9 @@ class TauriAPI {
     originalUrl?: string,
     ipAssetId?: string
   ): Promise<void> {
+    console.log('[TauriAPI] startAutomation called with:', { infringingUrl, originalUrl, ipAssetId });
+    console.log('[TauriAPI] isTauri:', this.isTauri);
+    
     if (!this.isTauri) {
       // Mock automation for web environment
       alert(`开始自动化申诉流程！\n侵权链接：${infringingUrl}\n原创链接：${originalUrl || '未提供'}`);
@@ -479,14 +482,21 @@ class TauriAPI {
     }
     
     try {
+      console.log('[TauriAPI] Importing Tauri invoke function...');
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('start_automation', {
-        infringingUrl,
-        originalUrl,
-        ipAssetId
-      });
+      console.log('[TauriAPI] Tauri invoke imported successfully');
+      
+      const params = {
+        infringingUrl: infringingUrl,
+        originalUrl: originalUrl,
+        ipAssetId: ipAssetId
+      };
+      console.log('[TauriAPI] Calling start_automation with params:', params);
+      
+      await invoke('start_automation', { params });
+      console.log('[TauriAPI] start_automation completed successfully');
     } catch (error) {
-      console.error('Failed to start automation:', error);
+      console.error('[TauriAPI] Failed to start automation:', error);
       throw error;
     }
   }
@@ -526,6 +536,50 @@ class TauriAPI {
         isRunning: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  }
+
+  async continueAutomationAfterVerification(): Promise<void> {
+    if (!this.isTauri) {
+      // Mock for web environment
+      alert('验证完成信号已发送！');
+      return;
+    }
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('continue_automation_after_verification');
+    } catch (error) {
+      console.error('Failed to continue automation after verification:', error);
+      throw error;
+    }
+  }
+
+  async checkAutomationEnvironment(): Promise<string> {
+    if (!this.isTauri) {
+      // Mock for web environment
+      return `🔍 RightsGuard 自动化环境检查报告 (模拟模式)
+
+✅ Node.js: v18.17.0 (模拟)
+✅ npm: 9.6.7 (模拟)
+✅ Playwright: Version 1.40.0 (模拟)
+
+🌐 系统浏览器配置:
+✅ Chrome浏览器: 配置正常，可以启动 (模拟)
+
+💡 使用说明:
+   • 当前为Web模式，实际功能需要桌面应用
+   • 自动化将优先使用Chrome浏览器
+   • 如果Chrome不可用，将自动切换到Edge
+   • 浏览器将以有头模式运行，便于人工验证`;
+    }
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<string>('check_automation_environment');
+    } catch (error) {
+      console.error('Failed to check automation environment:', error);
+      throw error;
     }
   }
 
@@ -816,6 +870,7 @@ class TauriAPI {
       throw new Error(`Database cache clear failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
+
 }
 
 // 导出单例实例

@@ -1,0 +1,115 @@
+4. Playwright自动化流程详细指令
+起始URL: https://www.bilibili.com/v/copyright/apply?origin=home
+
+流程第一步: 资质认证
+启动: Playwright以**有头模式(headless: false)**启动浏览器，并导航至起始URL。
+
+自动填充: 从本地数据库读取“个人档案”数据，并填充以下字段。
+
+名称: 找到 placeholder="真实姓名" 的输入框并填入。
+
+page.locator('input[placeholder="真实姓名"]').fill(userData.name);
+
+手机号: 找到 placeholder="手机号" 的输入框并填入。
+
+page.locator('input[placeholder="手机号"]').fill(userData.phone);
+
+邮箱: 找到 label:has-text("邮箱") 旁边的输入框并填入。
+
+page.locator('.el-form-item:has-text("邮箱") input').fill(userData.email);
+
+身份认证: 找到 placeholder="证件号码" 的输入框并填入。
+
+page.locator('input[placeholder="证件号码"]').fill(userData.idCardNumber);
+
+证件证明: 找到 class="el-upload__input" 的文件输入控件，并上传“个人档案”中配置的所有证件照片。
+
+page.locator('.el-form-item:has-text("证件证明") input[type="file"]').setInputFiles(userData.idCardFiles);
+
+暂停并等待人工介入:
+
+此时，页面停留在需要手机验证码的阶段。
+
+桌面应用前端弹窗提示：“请手动完成滑块验证，获取并输入短信验证码。完成后，请点击下方的‘我已完成验证’按钮。”
+
+继续流程:
+
+当用户在桌面应用上点击“我已完成验证”后，Playwright脚本接收到指令。
+
+点击“下一步”按钮。
+
+page.locator('button:has-text("下一步")').click();
+
+流程第二步: 权益认证
+选择IP资产: 在自动化启动前，用户已在主界面选择了要申诉的IP资产。
+
+自动填充: 从数据库读取选定的IP资产信息，并填充表单。
+
+权利人: 找到 label:has-text("权利人") 旁边的输入框填入。
+
+page.locator('.el-form-item:has-text("权利人") input').fill(ipData.owner);
+
+授权期限: 找到 placeholder="起始时间" 和 placeholder="结束时间" 的输入框填入。
+
+page.locator('input[placeholder="起始时间"]').first().fill(ipData.authStartDate);
+
+page.locator('input[placeholder="结束时间"]').first().fill(ipData.authEndDate);
+
+授权证明: 找到 label:has-text("授权证明") 旁边的文件上传控件并上传文件。
+
+page.locator('.el-form-item:has-text("授权证明") input[type="file"]').setInputFiles(ipData.authFiles);
+
+著作类型: 点击下拉菜单，并选择对应的类型。
+
+page.locator('.el-form-item:has-text("著作类型")').click();
+
+page.locator('.el-select-dropdown__item:has-text("' + ipData.workType + '")').click();
+
+著作名称: 找到 label:has-text("著作名称") 旁边的输入框填入。
+
+page.locator('.el-form-item:has-text("著作名称") input').fill(ipData.workName);
+
+地区: （此项通常无需改动，默认为“中国大陆”）。
+
+期限: 找到 label:has-text("期限") 旁边的日期选择器填入。
+
+page.locator('input[placeholder="起始时间"]').last().fill(ipData.workStartDate);
+
+page.locator('input[placeholder="结束时间"]').last().fill(ipData.workEndDate);
+
+证明: 找到 label:has-text("证明") 旁边的文件上传控件并上传文件。
+
+page.locator('.el-form-item:has-text("证明")').last().locator('input[type="file"]').setInputFiles(ipData.workProofFiles);
+
+点击下一步:
+
+page.locator('button:has-text("下一步")').click();
+
+流程第三步: 申诉请求
+获取申诉链接: 从主界面用户输入的“侵权作品URL”获取。
+
+自动填充:
+
+侵权链接: 找到 placeholder*="他人发布的B站侵权链接" 的输入框并填入。
+
+page.locator('input[placeholder*="他人发布的B站侵权链接"]').fill(caseData.infringingUrl);
+
+侵权描述: 找到 placeholder*="该链接内容全部" 的文本域，并填入一段预设的、标准化的侵权描述文本。该文本应作为应用的默认配置，允许用户修改。
+
+page.locator('textarea[placeholder*="该链接内容全部"]').fill(defaultDescription);
+
+原创链接: 如果用户在主界面输入了此项，则找到 label:has-text("原创链接") 旁的输入框并填入。
+
+page.locator('.textarea-wrapper:has-text("原创链接") input').fill(caseData.originalUrl);
+
+勾选承诺:
+
+点击“本人保证以上填写内容准确无误...”的复选框。
+
+page.locator('.el-checkbox__label:has-text("本人保证")').click();
+
+最终提交:
+
+点击“提交”按钮。
+
+page.locator('button:has-text("提交")').click();

@@ -18,10 +18,10 @@ RightsGuard is a desktop application for automated copyright infringement appeal
 - `npm run build:tauri` - Build complete desktop application (runs `npm run build` first, then builds Rust backend)
 
 ### Database
-- `npm run db:push` - Push Prisma schema changes to database
-- `npm run db:generate` - Generate Prisma client
-- `npm run db:migrate` - Run database migrations
-- `npm run db:reset` - Reset database
+**Note**: This project uses SQLx with SQLite directly, not Prisma. Database schema is managed in Rust code.
+- Database file location: `data/rights_guard.db` (created automatically)
+- Schema changes require manual SQL migrations in `src-tauri/src/database.rs`
+- Use the built-in "Test Database Connection" button in the app for diagnostics
 
 ### Testing
 Check the project for test scripts - none are currently defined in package.json.
@@ -35,10 +35,11 @@ Check the project for test scripts - none are currently defined in package.json.
 
 ### Technology Stack
 - **Frontend**: Next.js 15 + TypeScript + Tailwind CSS + shadcn/ui components
-- **Backend**: Rust + Tauri framework for desktop functionality
-- **Database**: SQLite with SQLx for async operations
-- **Automation**: Playwright for browser automation
+- **Backend**: Rust + Tauri 2.1 framework for desktop functionality
+- **Database**: SQLite with SQLx for async operations (no ORM)
+- **Automation**: Playwright for browser automation (currently placeholder implementation)
 - **UI Library**: Extensive use of Radix UI components via shadcn/ui
+- **Plugins**: tauri-plugin-dialog, tauri-plugin-opener for system integration
 
 ### Key Directories
 - `src/` - Next.js frontend source code
@@ -72,6 +73,23 @@ Check the project for test scripts - none are currently defined in package.json.
 - **Case**: Copyright infringement cases (URLs, associated IP assets, status)
 - **AutomationStatus**: Real-time status of automated appeal processes
 
+## Critical Development Practices
+
+### Code Quality and Linting
+- Always run `npm run lint` before committing changes
+- The project uses ESLint with Next.js configuration
+- Fix all linting errors before finalizing code changes
+
+### Error Handling Patterns
+- Backend: Use `CommandError` enum for consistent error handling across Tauri commands
+- Frontend: All Tauri API calls go through `tauriAPI` singleton with built-in error handling
+- Database: Use `anyhow::Context` for detailed error messages with full context
+
+### Commit Practices
+- Commit changes promptly after completing features or fixes
+- Use descriptive commit messages that explain the "why" not just the "what"
+- Reference issue numbers or feature descriptions in commit messages
+
 ## Development Workflow
 
 ### Environment Detection
@@ -80,8 +98,10 @@ The application automatically detects its running environment:
 - **Web mode**: Mock data and alerts for development/demo purposes
 
 ### Building for Production
-1. Build frontend: `npm run build` (generates `out/` static files)
+1. Build frontend: `npm run build` (generates `out/` static files for Tauri)
 2. Build desktop app: `npm run build:tauri` (creates platform-specific executables)
+
+**Important**: Next.js is configured for static export (`output: 'export'`) to work with Tauri. The frontend builds to `out/` directory which Tauri uses as `frontendDist`.
 
 ### Key Integration Points
 - Frontend communicates with backend exclusively through `tauriAPI` singleton

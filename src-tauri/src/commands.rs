@@ -101,15 +101,31 @@ pub async fn delete_case(id: String) -> Result<bool, CommandError> {
     Ok(true)
 }
 
-// 自动化相关命令
+// 自动化相关命令参数结构体
+#[derive(serde::Deserialize)]
+pub struct StartAutomationParams {
+    #[serde(rename = "infringingUrl")]
+    infringing_url: String,
+    #[serde(rename = "originalUrl")]
+    original_url: Option<String>,
+    #[serde(rename = "ipAssetId")]
+    ip_asset_id: Option<String>,
+}
+
 #[tauri::command]
-pub async fn start_automation(infringing_url: String, original_url: Option<String>, ip_asset_id: Option<String>) -> Result<(), CommandError> {
+pub async fn start_automation(params: StartAutomationParams) -> Result<(), CommandError> {
+    tracing::info!("start_automation called with: infringing_url={}, original_url={:?}, ip_asset_id={:?}", 
+                   params.infringing_url, params.original_url, params.ip_asset_id);
+    
     let request = AutomationRequest {
-        infringing_url,
-        original_url,
-        ip_asset_id: ip_asset_id.map(|id| Uuid::parse_str(&id)).transpose()?,
+        infringing_url: params.infringing_url,
+        original_url: params.original_url,
+        ip_asset_id: params.ip_asset_id.map(|id| Uuid::parse_str(&id)).transpose()?,
     };
+    
+    tracing::info!("Calling automation::start_automation with request: {:?}", request);
     automation::start_automation(request).await?;
+    tracing::info!("automation::start_automation completed successfully");
     Ok(())
 }
 
@@ -122,6 +138,20 @@ pub async fn stop_automation() -> Result<(), CommandError> {
 #[tauri::command]
 pub async fn get_automation_status() -> Result<AutomationStatus, CommandError> {
     Ok(automation::get_automation_status().await?)
+}
+
+#[tauri::command]
+pub async fn continue_automation_after_verification() -> Result<(), CommandError> {
+    automation::continue_after_verification().await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn check_automation_environment() -> Result<String, CommandError> {
+    match automation::check_automation_environment_public().await {
+        Ok(report) => Ok(report),
+        Err(e) => Err(CommandError::Automation(e.to_string()))
+    }
 }
 
 // 文件相关命令

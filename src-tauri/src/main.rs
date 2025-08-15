@@ -109,6 +109,8 @@ fn main() {
             start_automation,
             stop_automation,
             get_automation_status,
+            continue_automation_after_verification,
+            check_automation_environment,
             
             // 文件相关命令
             select_file,
@@ -122,7 +124,8 @@ fn main() {
             test_database,
             test_sqlite_connection_strategies,
             get_database_diagnostics,
-            clear_database_cache
+            clear_database_cache,
+            check_automation_environment
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

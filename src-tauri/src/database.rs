@@ -24,6 +24,7 @@ pub fn set_app_handle(handle: tauri::AppHandle) {
     tracing::info!("App handle set for database path resolution");
 }
 
+
 /// Get the proper database path using Tauri's app data directory
 /// This works consistently in both development and production builds
 pub fn get_database_path() -> Result<PathBuf> {

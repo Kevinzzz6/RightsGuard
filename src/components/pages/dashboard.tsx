@@ -57,28 +57,38 @@ export function DashboardPage() {
   }, [isReady, isTauri]);
 
   const handleSubmit = async () => {
+    console.log('handleSubmit called');
+    
     if (!infringingUrl) {
+      console.log('No infringing URL provided');
       await tauriAPI.showMessage("提示", "请输入侵权作品URL");
       return;
     }
     
     if (ipAssets.length === 0) {
-      await tauriAPI.showMessage("提示", "请先在“IP资产库”中添加至少一个IP资产");
+      console.log('No IP assets found');
+      await tauriAPI.showMessage("提示", "请先在IP资产库中添加至少一个IP资产");
       return;
     }
 
+    console.log('Starting automation with:', { infringingUrl, originalUrl, ipAssets });
     setIsSubmitting(true);
     
     try {
       // 在实际应用中，这里应该让用户选择IP资产
       // 暂时使用第一个IP资产
       const selectedIpAsset = ipAssets[0];
+      console.log('Selected IP asset:', selectedIpAsset);
       
+      console.log('Calling tauriAPI.startAutomation...');
       await tauriAPI.startAutomation(
         infringingUrl,
         originalUrl || undefined,
         selectedIpAsset?.id
       );
+      
+      console.log('Automation started successfully');
+      await tauriAPI.showMessage("成功", "自动化申诉流程已启动");
       
       setInfringingUrl("");
       setOriginalUrl("");
@@ -88,8 +98,44 @@ export function DashboardPage() {
       
     } catch (error) {
       console.error('Failed to start automation:', error);
-      const errorMessage = error instanceof Error ? error.message : "启动自动化流程失败";
-      await tauriAPI.showMessage("错误", errorMessage);
+      
+      // 提取更详细的错误信息
+      let errorMessage = "启动自动化流程失败";
+      let detailedError = "";
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        detailedError = error.stack || "";
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error && typeof error === 'object') {
+        errorMessage = (error as any).message || JSON.stringify(error);
+        detailedError = (error as any).stack || "";
+      }
+      
+      console.error('Error details:', { 
+        error, 
+        errorMessage, 
+        detailedError,
+        type: typeof error,
+        keys: error && typeof error === 'object' ? Object.keys(error) : []
+      });
+      
+      // 显示用户友好的错误信息
+      let userMessage = errorMessage;
+      
+      // 针对常见错误提供解决方案提示
+      if (errorMessage.includes("npx") || errorMessage.includes("Node.js")) {
+        userMessage += "\n\n解决方案：\n1. 请确保已安装Node.js\n2. 重启应用程序\n3. 检查系统PATH环境变量";
+      } else if (errorMessage.includes("Playwright")) {
+        userMessage += "\n\n解决方案：\n1. 打开命令行\n2. 运行：npm install -g @playwright/test\n3. 运行：npx playwright install";
+      } else if (errorMessage.includes("个人档案")) {
+        userMessage += "\n\n解决方案：\n请先完善个人档案信息";
+      } else if (errorMessage.includes("IP资产")) {
+        userMessage += "\n\n解决方案：\n请先添加至少一个IP资产";
+      }
+      
+      await tauriAPI.showMessage("启动自动化失败", userMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -118,6 +164,27 @@ export function DashboardPage() {
       await tauriAPI.openUrl(url);
     } catch (error) {
       console.error('Failed to open URL:', error);
+    }
+  };
+
+  const handleContinueAfterVerification = async () => {
+    try {
+      await tauriAPI.continueAutomationAfterVerification();
+      await tauriAPI.showMessage("成功", "验证完成信号已发送，自动化流程将继续执行");
+    } catch (error) {
+      console.error('Failed to continue automation after verification:', error);
+      await tauriAPI.showMessage("错误", "发送验证完成信号失败");
+    }
+  };
+
+  const handleCheckEnvironment = async () => {
+    try {
+      const report = await tauriAPI.checkAutomationEnvironment();
+      await tauriAPI.showMessage("🔍 自动化环境检查报告", report);
+    } catch (error) {
+      console.error('Failed to check automation environment:', error);
+      const errorMessage = error instanceof Error ? error.message : "环境检查失败";
+      await tauriAPI.showMessage("错误", `环境检查失败：${errorMessage}`);
     }
   };
 
@@ -171,15 +238,32 @@ export function DashboardPage() {
                   错误：{automationStatus.error}
                 </div>
               )}
-              <Button 
-                onClick={handleStopAutomation}
-                variant="outline"
-                size="sm"
-                className="mt-2"
-              >
-                <Square className="h-4 w-4 mr-2" />
-                停止自动化
-              </Button>
+              {/* 人工验证提示和按钮 */}
+              {automationStatus.currentStep?.includes('验证') && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <p className="text-sm text-yellow-800 mb-2">
+                    请在浏览器中手动完成滑块验证和短信验证码输入，完成后点击下方按钮继续。
+                  </p>
+                  <Button 
+                    onClick={handleContinueAfterVerification}
+                    variant="default"
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    我已完成验证
+                  </Button>
+                </div>
+              )}
+              <div className="flex gap-2 mt-2">
+                <Button 
+                  onClick={handleStopAutomation}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Square className="h-4 w-4 mr-2" />
+                  停止自动化
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -231,13 +315,25 @@ export function DashboardPage() {
             </div>
           </div>
           
-          <Button 
-            onClick={handleSubmit} 
-            className="w-full"
-            disabled={isSubmitting || automationStatus?.isRunning}
-          >
-            {isSubmitting ? "处理中..." : "开始申诉"}
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button 
+              onClick={handleSubmit} 
+              className="flex-1"
+              disabled={isSubmitting || automationStatus?.isRunning}
+            >
+              {isSubmitting ? "处理中..." : "开始申诉"}
+            </Button>
+            
+            {isTauri && (
+              <Button 
+                onClick={handleCheckEnvironment}
+                variant="outline"
+                className="sm:w-auto"
+              >
+                检查环境
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 
