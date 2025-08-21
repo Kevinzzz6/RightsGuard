@@ -581,3 +581,272 @@ pub async fn clear_database_cache() -> Result<String, CommandError> {
     database::clear_database_cache();
     Ok("Database cache cleared successfully".to_string())
 }
+
+// Browser connection commands
+#[tauri::command]
+pub async fn check_browser_connection_status() -> Result<String, CommandError> {
+    tracing::info!("Checking browser connection status");
+    
+    // Use the browser detection logic from automation.rs
+    let is_debug_port_available = check_chrome_debug_port().await;
+    let is_chrome_running = check_chrome_running().await;
+    
+    let status = if is_debug_port_available {
+        "connected".to_string()
+    } else if is_chrome_running {
+        "running_no_debug".to_string()
+    } else {
+        "disconnected".to_string()
+    };
+    
+    tracing::info!("Browser connection status: {}", status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn get_browser_launch_command() -> Result<String, CommandError> {
+    match get_chrome_user_data_dir() {
+        Ok(user_data_dir) => {
+            let command = if cfg!(target_os = "windows") {
+                format!("chrome.exe --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+            } else if cfg!(target_os = "macos") {
+                format!("/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+            } else {
+                format!("google-chrome --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+            };
+            Ok(command)
+        },
+        Err(e) => Err(CommandError::Automation(e.to_string()))
+    }
+}
+
+// Helper functions (these need to be accessible from commands.rs)
+async fn check_chrome_debug_port() -> bool {
+    // Check TCP port connection
+    if let Ok(_) = tokio::net::TcpStream::connect("127.0.0.1:9222").await {
+        // Further check debug API response
+        match check_chrome_debug_api().await {
+            Ok(true) => {
+                tracing::info!("Chrome debug port 9222 is available and API responds normally");
+                true
+            },
+            Ok(false) => {
+                tracing::warn!("Chrome debug port 9222 is reachable but API doesn't respond");
+                false
+            },
+            Err(e) => {
+                tracing::error!("Error checking Chrome debug API: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
+async fn check_chrome_debug_api() -> Result<bool, anyhow::Error> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+    
+    match client.get("http://127.0.0.1:9222/json/version").send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                let text = response.text().await?;
+                tracing::debug!("Chrome debug API response: {}", text);
+                Ok(true)
+            } else {
+                tracing::warn!("Chrome debug API response status code: {}", response.status());
+                Ok(false)
+            }
+        },
+        Err(e) => {
+            tracing::warn!("Chrome debug API request failed: {}", e);
+            Ok(false)
+        }
+    }
+}
+
+async fn check_chrome_running() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("tasklist")
+            .args(&["/FI", "IMAGENAME eq chrome.exe"])
+            .output();
+        
+        match output {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let is_running = stdout.contains("chrome.exe");
+                if is_running {
+                    tracing::info!("Detected Chrome process is running");
+                }
+                is_running
+            },
+            Err(e) => {
+                tracing::error!("Error checking Chrome process: {}", e);
+                false
+            }
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Linux/Mac implementation
+        let output = std::process::Command::new("pgrep")
+            .args(&["-f", "chrome"])
+            .output();
+            
+        match output {
+            Ok(output) => !output.stdout.is_empty(),
+            Err(_) => false
+        }
+    }
+}
+
+fn get_chrome_user_data_dir() -> Result<String, anyhow::Error> {
+    let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Unable to get user home directory"))?;
+    
+    // 使用自定义的非默认目录来避免Chrome的安全限制
+    #[cfg(target_os = "windows")]
+    let user_data_dir = home_dir.join("AppData\\Local\\RightsGuard\\ChromeProfile");
+    
+    #[cfg(target_os = "macos")]
+    let user_data_dir = home_dir.join("Library/Application Support/RightsGuard/ChromeProfile");
+    
+    #[cfg(target_os = "linux")]
+    let user_data_dir = home_dir.join(".config/rights-guard/chrome-profile");
+    
+    // 确保目录存在
+    if let Err(e) = std::fs::create_dir_all(&user_data_dir) {
+        tracing::warn!("Failed to create Chrome user data directory: {}", e);
+        // 尝试继续，有时目录已存在但权限问题导致create_dir_all失败
+    } else {
+        tracing::info!("Chrome user data directory ready: {:?}", user_data_dir);
+    }
+    
+    Ok(user_data_dir.to_str().unwrap_or_default().to_string())
+}
+
+#[tauri::command]
+pub async fn force_restart_chrome() -> Result<String, CommandError> {
+    tracing::info!("Force restarting Chrome - closing all instances");
+    let mut results = Vec::new();
+    
+    // Step 1: Close all Chrome processes
+    #[cfg(target_os = "windows")]
+    {
+        // First try gentle close
+        match std::process::Command::new("taskkill")
+            .args(&["/IM", "chrome.exe"])
+            .output() 
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if output.status.success() {
+                    results.push("✓ 已优雅关闭Chrome进程".to_string());
+                } else {
+                    results.push("⚠ 优雅关闭Chrome失败，尝试强制关闭...".to_string());
+                }
+                tracing::info!("Gentle chrome close output: {}", stdout);
+            }
+            Err(e) => {
+                tracing::warn!("Gentle chrome close failed: {}", e);
+                results.push("⚠ 优雅关闭失败，尝试强制关闭...".to_string());
+            }
+        }
+        
+        // Wait a moment
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        
+        // Force close if still running
+        match std::process::Command::new("tasklist")
+            .args(&["/FI", "IMAGENAME eq chrome.exe"])
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("chrome.exe") {
+                    // Still running, force close
+                    match std::process::Command::new("taskkill")
+                        .args(&["/F", "/IM", "chrome.exe"])
+                        .output()
+                    {
+                        Ok(force_output) => {
+                            if force_output.status.success() {
+                                results.push("✓ 已强制关闭所有Chrome进程".to_string());
+                            } else {
+                                results.push("✗ 强制关闭Chrome失败".to_string());
+                            }
+                        }
+                        Err(e) => {
+                            results.push(format!("✗ 强制关闭Chrome时出错: {}", e));
+                        }
+                    }
+                } else {
+                    results.push("✓ 所有Chrome进程已关闭".to_string());
+                }
+            }
+            Err(e) => {
+                results.push(format!("✗ 检查Chrome进程状态时出错: {}", e));
+            }
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Linux/Mac implementation
+        let gentle_result = std::process::Command::new("pkill")
+            .args(&["-TERM", "chrome"])
+            .output();
+            
+        if let Ok(_) = gentle_result {
+            results.push("✓ 发送关闭信号给Chrome进程".to_string());
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+        
+        let force_result = std::process::Command::new("pkill")
+            .args(&["-KILL", "chrome"])
+            .output();
+            
+        if let Ok(_) = force_result {
+            results.push("✓ 强制关闭所有Chrome进程".to_string());
+        } else {
+            results.push("⚠ 关闭Chrome进程可能失败".to_string());
+        }
+    }
+    
+    // Step 2: Wait for processes to fully close
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    
+    // Step 3: Verify all processes are closed
+    let final_check = check_chrome_running().await;
+    if !final_check {
+        results.push("✓ 确认所有Chrome进程已关闭".to_string());
+    } else {
+        results.push("⚠ 部分Chrome进程可能仍在运行".to_string());
+    }
+    
+    // Step 4: Provide restart guidance
+    results.push("".to_string());
+    results.push("🔄 Chrome已关闭，请使用以下命令重新启动:".to_string());
+    
+    let user_data_dir = get_chrome_user_data_dir().unwrap_or_default();
+    let command = if cfg!(target_os = "windows") {
+        format!("chrome.exe --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+    } else if cfg!(target_os = "macos") {
+        format!("/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+    } else {
+        format!("google-chrome --remote-debugging-port=9222 --user-data-dir=\"{}\"", user_data_dir)
+    };
+    
+    results.push("".to_string());
+    results.push(command);
+    results.push("".to_string());
+    results.push("💡 提示: 运行上述命令后，系统将自动检测连接状态".to_string());
+    
+    let final_report = results.join("\n");
+    tracing::info!("Chrome restart completed: {}", final_report);
+    
+    Ok(final_report)
+}

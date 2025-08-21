@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tauri Environment Test</title>
+</head>
+<body>
+    <h1>Tauri Environment Detection Test</h1>
+    <div id="output"></div>
+
+    <script>
+        console.log('Test starting...');
+        
+        // Simulate our TauriAPI detection logic
+        function testEnvironmentDetection() {
+            const output = document.getElementById('output');
+            let results = [];
+            
+            // Check browser environment
+            const inBrowser = typeof window !== 'undefined';
+            results.push(`inBrowser: ${inBrowser}`);
+            
+            if (inBrowser) {
+                // Check for Tauri internals
+                const hasTauriInternals = '__TAURI_INTERNALS__' in window;
+                const hasTauriGlobal = '__TAURI__' in window;
+                const userAgent = window.navigator.userAgent;
+                const userAgentTauri = userAgent.includes('Tauri');
+                const windowKeys = Object.keys(window).filter(k => k.includes('TAURI'));
+                
+                results.push(`hasTauriInternals: ${hasTauriInternals}`);
+                results.push(`hasTauriGlobal: ${hasTauriGlobal}`);
+                results.push(`userAgentTauri: ${userAgentTauri}`);
+                results.push(`userAgent: ${userAgent}`);
+                results.push(`windowKeys with TAURI: ${windowKeys.join(', ') || 'none'}`);
+                
+                const isTauri = hasTauriInternals || hasTauriGlobal || userAgentTauri;
+                results.push(`Final decision - isTauri: ${isTauri}`);
+            }
+            
+            output.innerHTML = '<pre>' + results.join('\n') + '</pre>';
+        }
+        
+        // Run test
+        testEnvironmentDetection();
+    </script>
+</body>
+</html>

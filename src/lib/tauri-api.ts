@@ -53,36 +53,92 @@ export interface FileSelection {
 }
 
 class TauriAPI {
-  private isTauri: boolean;
+  private isTauri: boolean = false;
+  private isInitialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor() {
-    // 在服务器端渲染时，默认为false
-    const inBrowser = typeof window !== 'undefined';
-    const hasTauriInternals = inBrowser && '__TAURI_INTERNALS__' in window;
-    
-    console.log('[TauriAPI] Environment check:');
-    console.log('  - inBrowser:', inBrowser);
-    console.log('  - hasTauriInternals:', hasTauriInternals);
-    console.log('  - window.navigator.userAgent:', inBrowser ? window.navigator.userAgent : 'N/A');
-    console.log('  - window object keys with TAURI:', inBrowser ? Object.keys(window).filter(k => k.includes('TAURI')).join(', ') : 'N/A');
-    
-    // Additional debug info
-    if (inBrowser) {
-      console.log('  - window.__TAURI_INTERNALS__:', window.__TAURI_INTERNALS__ ? 'exists' : 'missing');
-      console.log('  - process.env.NODE_ENV:', process.env.NODE_ENV);
-    }
-    
-    this.isTauri = hasTauriInternals;
-    console.log('[TauriAPI] Final isTauri decision:', this.isTauri);
+    // SSR安全：构造函数中不检测环境，延迟到运行时
+    console.log('[TauriAPI] Constructor called - deferring environment detection to client-side');
   }
 
-  // 检查是否在Tauri环境中
-  isInTauri(): boolean {
+  // 运行时环境检测 - 只在浏览器环境中调用
+  private async detectEnvironment(): Promise<void> {
+    if (this.isInitialized) {
+      return; // 已经初始化过
+    }
+
+    // 确保在浏览器环境中运行
+    const inBrowser = typeof window !== 'undefined';
+    if (!inBrowser) {
+      console.log('[TauriAPI] Still in SSR environment, skipping detection');
+      return;
+    }
+
+    console.log('[TauriAPI] Runtime environment check:');
+    console.log('  - inBrowser:', inBrowser);
+    console.log('  - window.navigator.userAgent:', window.navigator.userAgent);
+    console.log('  - process.env.NODE_ENV:', process.env.NODE_ENV);
+
+    // 多重检测策略
+    const checks = {
+      hasTauriInternals: '__TAURI_INTERNALS__' in window,
+      hasTauriGlobal: '__TAURI__' in window,
+      canImportTauri: false,
+      userAgentTauri: window.navigator.userAgent.includes('Tauri')
+    };
+
+    console.log('  - __TAURI_INTERNALS__:', checks.hasTauriInternals ? 'exists' : 'missing');
+    console.log('  - __TAURI__ global:', checks.hasTauriGlobal ? 'exists' : 'missing');
+    console.log('  - User agent:', window.navigator.userAgent);
+
+    // 尝试动态导入Tauri
+    try {
+      const tauriModule = await import('@tauri-apps/api/core');
+      checks.canImportTauri = !!tauriModule.invoke;
+      console.log('  - Tauri import test: SUCCESS');
+    } catch (error) {
+      console.log('  - Tauri import test: FAILED -', error instanceof Error ? error.message : String(error));
+    }
+
+    console.log('  - Window keys with TAURI:', Object.keys(window).filter(k => k.includes('TAURI')).join(', ') || 'none');
+
+    // 综合判断 - 任一条件满足即认为在Tauri环境中
+    this.isTauri = checks.hasTauriInternals || checks.hasTauriGlobal || checks.canImportTauri || checks.userAgentTauri;
+    this.isInitialized = true;
+
+    console.log('[TauriAPI] Final runtime isTauri decision:', this.isTauri);
+    console.log('[TauriAPI] Detection details:', checks);
+  }
+
+  // 确保环境已检测
+  private async ensureInitialized(): Promise<void> {
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    this.initPromise = this.detectEnvironment();
+    await this.initPromise;
+  }
+
+  // 检查是否在Tauri环境中 - 现在是异步的
+  async isInTauri(): Promise<boolean> {
+    await this.ensureInitialized();
+    return this.isTauri;
+  }
+
+  // 同步版本 - 仅在确定已初始化后使用
+  isInTauriSync(): boolean {
+    if (!this.isInitialized) {
+      console.warn('[TauriAPI] Environment not yet detected, returning false');
+      return false;
+    }
     return this.isTauri;
   }
 
   // 个人档案相关API
   async getProfile(): Promise<Profile | null> {
+    await this.ensureInitialized();
     console.log('[TauriAPI] getProfile called, isTauri:', this.isTauri);
     
     if (!this.isTauri) {
@@ -131,6 +187,7 @@ class TauriAPI {
   }
 
   async saveProfile(profile: Omit<Profile, 'createdAt' | 'updatedAt'>): Promise<Profile> {
+    await this.ensureInitialized();
     console.log('[TauriAPI] saveProfile called, isTauri:', this.isTauri);
     console.log('[TauriAPI] Profile to save:', profile);
     
@@ -868,6 +925,90 @@ class TauriAPI {
     } catch (error) {
       console.error('[TauriAPI] Failed to clear database cache:', error);
       throw new Error(`Database cache clear failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Browser connection API
+  async checkBrowserConnectionStatus(): Promise<string> {
+    await this.ensureInitialized();
+    console.log('[TauriAPI] checkBrowserConnectionStatus called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock browser status - not in Tauri environment');
+      // Mock random status for demonstration
+      const statuses = ['connected', 'disconnected', 'running_no_debug'];
+      return statuses[Math.floor(Math.random() * statuses.length)];
+    }
+
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for browser connection check...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling check_browser_connection_status command...');
+      const result = await invoke<string>('check_browser_connection_status');
+      console.log('[TauriAPI] Browser connection status result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to check browser connection status:', error);
+      return 'disconnected'; // Return disconnected on error
+    }
+  }
+
+  async getBrowserLaunchCommand(): Promise<string> {
+    await this.ensureInitialized();
+    console.log('[TauriAPI] getBrowserLaunchCommand called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock browser command - not in Tauri environment');
+      return 'chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\\Users\\User\\AppData\\Local\\Google\\Chrome\\User Data"';
+    }
+
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for browser command...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling get_browser_launch_command command...');
+      const result = await invoke<string>('get_browser_launch_command');
+      console.log('[TauriAPI] Browser launch command result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to get browser launch command:', error);
+      throw new Error(`Failed to get browser launch command: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  async forceRestartChrome(): Promise<string> {
+    await this.ensureInitialized();
+    console.log('[TauriAPI] forceRestartChrome called, isTauri:', this.isTauri);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock force restart - not in Tauri environment');
+      return `🔄 模拟强制重启Chrome完成
+
+✓ 已关闭所有Chrome进程 (模拟)
+✓ 确认所有Chrome进程已关闭 (模拟)
+
+🔄 Chrome已关闭，请使用以下命令重新启动:
+
+chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\\Users\\User\\AppData\\Local\\Google\\Chrome\\User Data"
+
+💡 提示: 运行上述命令后，系统将自动检测连接状态`;
+    }
+
+    try {
+      console.log('[TauriAPI] Importing Tauri invoke function for force restart...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      console.log('[TauriAPI] Calling force_restart_chrome command...');
+      const result = await invoke<string>('force_restart_chrome');
+      console.log('[TauriAPI] Force restart Chrome result:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to force restart Chrome:', error);
+      throw new Error(`Failed to force restart Chrome: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 

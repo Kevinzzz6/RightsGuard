@@ -125,7 +125,12 @@ fn main() {
             test_sqlite_connection_strategies,
             get_database_diagnostics,
             clear_database_cache,
-            check_automation_environment
+            check_automation_environment,
+            
+            // 浏览器连接相关命令
+            check_browser_connection_status,
+            get_browser_launch_command,
+            force_restart_chrome
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

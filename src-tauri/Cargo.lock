@@ -3771,8 +3771,10 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "dirs 6.0.0",
  "once_cell",
  "playwright",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "sqlx",
