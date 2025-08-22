@@ -162,11 +162,34 @@ export function ProfilePage() {
         console.log('[Profile] File selection result:', selection);
         
         if (selection.paths.length > 0) {
-            setProfileData(prev => ({
-                ...prev,
-                idCardFiles: [...(prev.idCardFiles || []), ...selection.paths]
-            }));
-            console.log('[Profile] Updated profile with new files');
+            const copiedFiles: string[] = [];
+            
+            // Copy each selected file to app data directory
+            for (const filePath of selection.paths) {
+                try {
+                    console.log('[Profile] Copying file to app data:', filePath);
+                    const relativePath = await tauriAPI.copyFileToAppData(
+                        filePath,
+                        'profiles',
+                        'id_cards'
+                    );
+                    copiedFiles.push(relativePath);
+                    console.log('[Profile] File copied successfully:', relativePath);
+                } catch (copyError) {
+                    console.error('[Profile] Failed to copy file:', filePath, copyError);
+                    await tauriAPI.showMessage("错误", `文件复制失败: ${filePath}\n${copyError instanceof Error ? copyError.message : '未知错误'}`);
+                }
+            }
+            
+            if (copiedFiles.length > 0) {
+                setProfileData(prev => ({
+                    ...prev,
+                    idCardFiles: [...(prev.idCardFiles || []), ...copiedFiles]
+                }));
+                console.log('[Profile] Updated profile with copied files:', copiedFiles);
+                
+                await tauriAPI.showMessage("成功", `成功添加 ${copiedFiles.length} 个文件到身份证证明`);
+            }
         }
     } catch (error) {
         console.error("[Profile] File selection error:", error);

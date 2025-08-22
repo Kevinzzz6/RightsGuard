@@ -850,3 +850,84 @@ pub async fn force_restart_chrome() -> Result<String, CommandError> {
     
     Ok(final_report)
 }
+
+// File management commands for automation
+#[tauri::command]
+pub async fn copy_file_to_app_data(
+    source_path: String,
+    category: String, // "profiles" or "ip_assets"
+    subcategory: String // "id_cards", "auth_docs", "proof_docs"
+) -> Result<String, CommandError> {
+    tracing::info!("Copying file to app data: {} -> {}/{}", source_path, category, subcategory);
+    
+    // Get app data directory
+    let app_handle_guard = database::APP_HANDLE.lock().unwrap();
+    let app_handle = app_handle_guard.as_ref()
+        .ok_or_else(|| CommandError::Automation("App handle not available".to_string()))?;
+    
+    let app_data_dir = app_handle.path().app_data_dir()
+        .map_err(|e| CommandError::Automation(format!("Failed to get app data directory: {}", e)))?;
+    
+    // Create target directory structure
+    let files_dir = app_data_dir.join("files").join(&category).join(&subcategory);
+    fs::create_dir_all(&files_dir)
+        .map_err(|e| CommandError::Automation(format!("Failed to create directory: {}", e)))?;
+    
+    // Get source file info
+    let source_file = std::path::Path::new(&source_path);
+    if !source_file.exists() {
+        return Err(CommandError::Automation(format!("Source file does not exist: {}", source_path)));
+    }
+    
+    let file_name = source_file.file_name()
+        .ok_or_else(|| CommandError::Automation("Invalid source file name".to_string()))?
+        .to_string_lossy();
+    
+    // Generate unique filename if needed
+    let target_file = files_dir.join(file_name.as_ref());
+    let final_target = if target_file.exists() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let file_stem = source_file.file_stem()
+            .unwrap_or_default().to_string_lossy();
+        let extension = source_file.extension()
+            .map(|ext| format!(".{}", ext.to_string_lossy()))
+            .unwrap_or_default();
+        files_dir.join(format!("{}_{}{}", file_stem, timestamp, extension))
+    } else {
+        target_file
+    };
+    
+    // Copy the file
+    fs::copy(&source_path, &final_target)
+        .map_err(|e| CommandError::Automation(format!("Failed to copy file: {}", e)))?;
+    
+    let relative_path = format!("files/{}/{}/{}", 
+        category, 
+        subcategory, 
+        final_target.file_name().unwrap().to_string_lossy()
+    );
+    
+    tracing::info!("File copied successfully: {}", relative_path);
+    Ok(relative_path)
+}
+
+#[tauri::command]
+pub async fn get_app_file_path(relative_path: String) -> Result<String, CommandError> {
+    let app_handle_guard = database::APP_HANDLE.lock().unwrap();
+    let app_handle = app_handle_guard.as_ref()
+        .ok_or_else(|| CommandError::Automation("App handle not available".to_string()))?;
+    
+    let app_data_dir = app_handle.path().app_data_dir()
+        .map_err(|e| CommandError::Automation(format!("Failed to get app data directory: {}", e)))?;
+    
+    let full_path = app_data_dir.join(&relative_path);
+    
+    if !full_path.exists() {
+        return Err(CommandError::Automation(format!("File does not exist: {}", relative_path)));
+    }
+    
+    Ok(full_path.to_string_lossy().to_string())
+}

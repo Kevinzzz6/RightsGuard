@@ -1012,6 +1012,55 @@ chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\\Users\\User\\AppDat
     }
   }
 
+  // File management API for automation
+  async copyFileToAppData(
+    sourcePath: string,
+    category: 'profiles' | 'ip_assets',
+    subcategory: 'id_cards' | 'auth_docs' | 'proof_docs'
+  ): Promise<string> {
+    await this.ensureInitialized();
+    console.log('[TauriAPI] copyFileToAppData called:', { sourcePath, category, subcategory });
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock file copy - not in Tauri environment');
+      return `files/${category}/${subcategory}/mock_${Date.now()}.jpg`;
+    }
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const result = await invoke<string>('copy_file_to_app_data', {
+        sourcePath,
+        category,
+        subcategory
+      });
+      console.log('[TauriAPI] File copied to app data:', result);
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to copy file to app data:', error);
+      throw error;
+    }
+  }
+
+  async getAppFilePath(relativePath: string): Promise<string> {
+    await this.ensureInitialized();
+    console.log('[TauriAPI] getAppFilePath called:', relativePath);
+    
+    if (!this.isTauri) {
+      console.log('[TauriAPI] Using mock file path - not in Tauri environment');
+      return `/mock/path/${relativePath}`;
+    }
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const result = await invoke<string>('get_app_file_path', { relativePath });
+      console.log('[TauriAPI] App file path:', result);
+      return result;
+    } catch (error) {
+      console.error('[TauriAPI] Failed to get app file path:', error);
+      throw error;
+    }
+  }
+
 }
 
 // 导出单例实例

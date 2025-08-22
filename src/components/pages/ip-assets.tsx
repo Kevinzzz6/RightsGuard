@@ -108,17 +108,46 @@ export function IpAssetsPage() {
 
   const handleFileSelect = async (type: 'auth' | 'proof') => {
     try {
+        console.log('[IP Assets] Starting file selection for:', type);
         const selection = await tauriAPI.selectFiles();
+        console.log('[IP Assets] File selection result:', selection);
+        
         if (selection.paths.length > 0) {
-            const field = type === 'auth' ? 'authFiles' : 'workProofFiles';
-            setFormData(prev => ({
-                ...prev,
-                [field]: [...(prev[field] || []), ...selection.paths]
-            }));
+            const copiedFiles: string[] = [];
+            const subcategory = type === 'auth' ? 'auth_docs' : 'proof_docs';
+            
+            // Copy each selected file to app data directory
+            for (const filePath of selection.paths) {
+                try {
+                    console.log('[IP Assets] Copying file to app data:', filePath);
+                    const relativePath = await tauriAPI.copyFileToAppData(
+                        filePath,
+                        'ip_assets',
+                        subcategory
+                    );
+                    copiedFiles.push(relativePath);
+                    console.log('[IP Assets] File copied successfully:', relativePath);
+                } catch (copyError) {
+                    console.error('[IP Assets] Failed to copy file:', filePath, copyError);
+                    await tauriAPI.showMessage("错误", `文件复制失败: ${filePath}\n${copyError instanceof Error ? copyError.message : '未知错误'}`);
+                }
+            }
+            
+            if (copiedFiles.length > 0) {
+                const field = type === 'auth' ? 'authFiles' : 'workProofFiles';
+                setFormData(prev => ({
+                    ...prev,
+                    [field]: [...(prev[field] || []), ...copiedFiles]
+                }));
+                console.log('[IP Assets] Updated form with copied files:', copiedFiles);
+                
+                const fileTypeLabel = type === 'auth' ? '授权证明' : '作品证明';
+                await tauriAPI.showMessage("成功", `成功添加 ${copiedFiles.length} 个文件到${fileTypeLabel}`);
+            }
         }
     } catch (error) {
-        console.error("File selection error:", error);
-        await tauriAPI.showMessage("错误", "文件选择失败");
+        console.error("[IP Assets] File selection error:", error);
+        await tauriAPI.showMessage("错误", `文件选择失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
   

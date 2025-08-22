@@ -130,7 +130,11 @@ fn main() {
             // 浏览器连接相关命令
             check_browser_connection_status,
             get_browser_launch_command,
-            force_restart_chrome
+            force_restart_chrome,
+            
+            // 文件管理相关命令
+            copy_file_to_app_data,
+            get_app_file_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
