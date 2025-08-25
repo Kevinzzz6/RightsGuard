@@ -607,6 +607,10 @@ fn generate_connect_script(
                                             console.log('⚠️ Element UI API策略需要真实File对象，当前跳过此策略');
                                             console.log('💡 建议使用hidden_input策略，可以直接设置文件路径');
                                             return {{ success: false, error: 'Cannot create real File objects with content in browser context' }};
+                                        }} else {{
+                                            console.log('❌ 未找到Vue实例');
+                                            return {{ success: false, error: 'Vue instance not found' }};
+                                        }}
                                     }}, finalFiles);
                                     
                                     console.log(`📊 API调用结果:`, JSON.stringify(apiCallResult, null, 2));
