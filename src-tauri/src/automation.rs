@@ -150,9 +150,11 @@ async fn run_automation_process(request: Arc<AutomationRequest>) -> Result<()> {
     tracing::info!("Playwright脚本已生成: {:?}", script_path_buf);
     
     update_status("正在启动Playwright测试...", 35.0).await;
+    tracing::info!("🚀 开始执行Playwright脚本，监控日志输出...");
     execute_playwright_test(&script_path_for_command, &project_root).await.context("执行Playwright脚本失败")?;
     
     update_status("Playwright脚本执行完成", 90.0).await;
+    tracing::info!("✅ Playwright脚本执行完成，检查输出结果...");
     let _ = std::fs::remove_file(&script_path_buf);
 
     update_status("申诉提交成功", 100.0).await;
@@ -193,9 +195,29 @@ async fn execute_playwright_test(script_path: &str, project_root: &std::path::Pa
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    tracing::info!("Playwright stdout: {}", stdout);
+    tracing::info!("📊 Playwright执行完成，开始分析输出日志...");
+    tracing::info!("📏 stdout长度: {} 字符", stdout.len());
+    tracing::info!("📏 stderr长度: {} 字符", stderr.len());
+    
+    // 分块输出stdout，避免单行过长
+    if !stdout.is_empty() {
+        let stdout_lines: Vec<&str> = stdout.lines().collect();
+        tracing::info!("📄 Playwright stdout ({} 行):", stdout_lines.len());
+        
+        for (i, line) in stdout_lines.iter().enumerate() {
+            if i < 100 { // 限制显示前100行，避免日志过长
+                tracing::info!("  stdout[{}]: {}", i + 1, line);
+            } else if i == 100 {
+                tracing::info!("  stdout[...]: 剩余 {} 行已省略", stdout_lines.len() - 100);
+                break;
+            }
+        }
+    } else {
+        tracing::warn!("⚠️ Playwright stdout为空，可能脚本未正常执行");
+    }
+    
     if !stderr.is_empty() {
-        tracing::warn!("Playwright stderr: {}", stderr);
+        tracing::warn!("📄 Playwright stderr: {}", stderr);
     }
     
     if !output.status.success() {
@@ -580,63 +602,11 @@ fn generate_connect_script(
                                         if (vueInstance) {{
                                             console.log('📡 找到Vue实例，组件类型:', vueInstance.$options.name || 'Unknown');
                                             
-                                            // 创建模拟的File对象
-                                            const mockFiles = [];
-                                            for (const filePath of files) {{
-                                                const fileName = filePath.split(/[/\\\\]/).pop();
-                                                const mockFile = new File(['mock content'], fileName, {{
-                                                    type: 'image/png',
-                                                    lastModified: Date.now()
-                                                }});
-                                                // 添加路径信息以便后续处理
-                                                Object.defineProperty(mockFile, 'path', {{
-                                                    value: filePath,
-                                                    writable: false
-                                                }});
-                                                mockFiles.push(mockFile);
-                                            }}
-                                            
-                                            // 尝试不同的Element UI Upload方法
-                                            const methods = [
-                                                'uploadFiles',
-                                                'handleStart', 
-                                                'handleFiles',
-                                                'onStart',
-                                                'handleChange',
-                                                'clearFiles'
-                                            ];
-                                            
-                                            let successMethod = null;
-                                            for (const method of methods) {{
-                                                if (typeof vueInstance[method] === 'function') {{
-                                                    console.log(`📡 找到方法: ${{method}}`);
-                                                    try {{
-                                                        if (method === 'handleFiles' || method === 'uploadFiles') {{
-                                                            vueInstance[method](mockFiles);
-                                                        }} else if (method === 'handleStart' || method === 'onStart') {{
-                                                            mockFiles.forEach(file => vueInstance[method](file));
-                                                        }} else if (method === 'handleChange') {{
-                                                            vueInstance[method]({{ target: {{ files: mockFiles }} }});
-                                                        }}
-                                                        successMethod = method;
-                                                        console.log(`✅ 成功调用方法: ${{method}}`);
-                                                        break;
-                                                    }} catch (methodError) {{
-                                                        console.log(`❌ 方法${{method}}调用失败:`, methodError.message);
-                                                    }}
-                                                }}
-                                            }}
-                                            
-                                            // 触发Vue的响应式更新
-                                            if (vueInstance.$forceUpdate) {{
-                                                vueInstance.$forceUpdate();
-                                            }}
-                                            
-                                            return {{ success: !!successMethod, method: successMethod, componentName: vueInstance.$options.name }};
-                                        }} else {{
-                                            console.log('❌ 未找到Vue实例');
-                                            return {{ success: false, error: 'No Vue instance found' }};
-                                        }}
+                                            // ❌ 不使用Mock File - 这会导致上传空内容
+                                            // ✅ Element UI API策略暂时跳过，因为无法传递真实文件内容
+                                            console.log('⚠️ Element UI API策略需要真实File对象，当前跳过此策略');
+                                            console.log('💡 建议使用hidden_input策略，可以直接设置文件路径');
+                                            return {{ success: false, error: 'Cannot create real File objects with content in browser context' }};
                                     }}, finalFiles);
                                     
                                     console.log(`📊 API调用结果:`, JSON.stringify(apiCallResult, null, 2));
@@ -798,80 +768,66 @@ fn generate_connect_script(
                                 }});
                                 console.log(`📊 元素信息:`, JSON.stringify(elementInfo, null, 2));
                                 
-                                console.log(`📁 直接设置文件到隐藏输入元素，无需检查可见性`);
+                                // 🔍 关键修复：逐个文件上传而非一次性多文件上传
+                                console.log(`📁 开始逐个文件上传策略，避免多文件一次性设置问题`);
                                 console.log(`🎯 设置前文件数量: ${{elementInfo.files}}`);
-                                console.log(`🎯 将要设置的文件: [${{finalFiles.join(', ')}}]`);
+                                console.log(`🎯 总共需要上传: ${{finalFiles.length}} 个文件`);
                                 
-                                await element.setInputFiles(finalFiles);
-                                console.log(`✅ setInputFiles调用完成`);
+                                let successfulUploads = 0;
                                 
-                                // 检查设置后的文件数量
-                                const afterFiles = await element.evaluate(el => el.files ? el.files.length : 0);
-                                console.log(`🎯 设置后文件数量: ${{afterFiles}}`);
-                                
-                                if (afterFiles !== finalFiles.length) {{
-                                    console.log(`⚠️ 警告: 期望设置${{finalFiles.length}}个文件，实际只设置了${{afterFiles}}个`);
+                                // 逐个上传每个文件
+                                for (let fileIndex = 0; fileIndex < finalFiles.length; fileIndex++) {{
+                                    const filePath = finalFiles[fileIndex];
+                                    const fileName = filePath.split(/[/\\\\\\\\]/).pop();
+                                    console.log(`\\n📄 上传第${{fileIndex + 1}}/${{finalFiles.length}}个文件: ${{fileName}}`);
+                                    console.log(`📍 文件路径: ${{filePath}}`);
+                                    
+                                    try {{
+                                        // 设置单个文件
+                                        await element.setInputFiles([filePath]);
+                                        console.log(`✅ 文件${{fileIndex + 1}}设置完成`);
+                                        
+                                        // 检查设置是否成功
+                                        const afterSingleFile = await element.evaluate(el => el.files ? el.files.length : 0);
+                                        console.log(`🎯 文件${{fileIndex + 1}}设置后元素文件数量: ${{afterSingleFile}}`);
+                                        
+                                        if (afterSingleFile > 0) {{
+                                            console.log(`✅ 文件${{fileIndex + 1}}成功设置到输入元素`);
+                                            successfulUploads++;
+                                            
+                                            // 立即触发事件处理该文件
+                                            await element.evaluate((input) => {{
+                                                const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
+                                                const inputEvent = new Event('input', {{ bubbles: true, cancelable: true }});
+                                                input.dispatchEvent(inputEvent);
+                                                input.dispatchEvent(changeEvent);
+                                                console.log(`📡 文件${{fileIndex + 1}}事件已触发`);
+                                            }});
+                                            
+                                            // 等待处理完成
+                                            console.log(`⏳ 等待文件${{fileIndex + 1}}处理完成...`);
+                                            await page.waitForTimeout(2000);
+                                            
+                                            // 检查是否生成了上传项目
+                                            const uploadItemsNow = await page.locator('.el-upload-list__item').count();
+                                            console.log(`📊 文件${{fileIndex + 1}}处理后上传项目数量: ${{uploadItemsNow}}`);
+                                            
+                                        }} else {{
+                                            console.log(`❌ 文件${{fileIndex + 1}}设置失败，输入元素文件数量仍为0`);
+                                        }}
+                                        
+                                    }} catch (singleFileError) {{
+                                        console.log(`❌ 文件${{fileIndex + 1}}上传失败: ${{singleFileError.message}}`);
+                                    }}
                                 }}
                                 
-                                // 主动触发change事件确保页面响应
-                                console.log(`🔍 开始触发DOM事件和Element UI特殊处理...`);
-                                await element.evaluate((input, files) => {{
-                                    console.log('📡 开始事件触发序列...');
-                                    
-                                    // 标准DOM事件
-                                    const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
-                                    const inputEvent = new Event('input', {{ bubbles: true, cancelable: true }});
-                                    
-                                    // Element UI可能使用的自定义事件
-                                    const customChangeEvent = new CustomEvent('el.upload.change', {{ 
-                                        bubbles: true, 
-                                        detail: {{ files: input.files }} 
-                                    }});
-                                    
-                                    // 触发事件序列
-                                    input.dispatchEvent(inputEvent);
-                                    input.dispatchEvent(changeEvent); 
-                                    input.dispatchEvent(customChangeEvent);
-                                    
-                                    // 尝试触发Element UI的文件处理
-                                    try {{
-                                        // 检查是否有Vue实例
-                                        const vueInstance = input.__vue__ || input._vueParentComponent;
-                                        if (vueInstance) {{
-                                            console.log('📡 发现Vue实例，尝试触发Vue方法');
-                                            // 可能的Element UI方法名
-                                            if (vueInstance.handleChange) {{
-                                                console.log('📡 调用handleChange方法');
-                                                vueInstance.handleChange({{ target: input }});
-                                            }}
-                                            if (vueInstance.$emit) {{
-                                                console.log('📡 触发Vue事件');
-                                                vueInstance.$emit('change', input.files);
-                                            }}
-                                        }}
-                                        
-                                        // 查找父级Element Upload组件
-                                        const uploadComponent = input.closest('.el-upload');
-                                        if (uploadComponent && uploadComponent.__vue__) {{
-                                            console.log('📡 发现Upload组件实例');
-                                            const uploadVue = uploadComponent.__vue__;
-                                            if (uploadVue.handleChange) {{
-                                                uploadVue.handleChange({{ target: input }});
-                                            }}
-                                        }}
-                                        
-                                    }} catch (vueError) {{
-                                        console.log('📡 Vue方法调用失败:', vueError.message);
-                                    }}
-                                    
-                                    console.log('✅ 已触发完整事件序列: input -> change -> custom -> vue');
-                                }}, finalFiles);
+                                console.log(`\\n📊 逐个上传完成统计: 成功${{successfulUploads}}/${{finalFiles.length}}个文件`);
                                 
-                                console.log(`✅ 策略${{i+1}}文件设置完成: ${{strategy.name}}`);
+                                console.log(`✅ 策略${{i+1}}逐个文件处理完成: ${{strategy.name}}`);
                                 
-                                // 验证上传成功 - 延长等待时间
-                                console.log(`⏳ 等待隐藏输入处理完成...`);
-                                await page.waitForTimeout(4000);
+                                // 最终验证所有文件上传成功 - 延长等待时间
+                                console.log(`⏳ 等待所有文件最终处理完成...`);
+                                await page.waitForTimeout(3000);
                                 
                                 // 检查多种上传成功指示器
                                 const uploadItemsVariants = [
@@ -891,11 +847,23 @@ fn generate_connect_script(
                                     }}
                                 }}
                                 
-                                console.log(`📊 总上传项目数量: ${{totalUploadItems}}`);
+                                console.log(`📊 最终上传项目数量: ${{totalUploadItems}}`);
+                                console.log(`📊 成功处理的文件数量: ${{successfulUploads}}`);
+                                console.log(`📊 期望上传的文件数量: ${{finalFiles.length}}`);
                                 
-                                if (totalUploadItems > 0) {{
+                                // 判断成功条件：至少上传了一些文件
+                                if (totalUploadItems > 0 || successfulUploads > 0) {{
                                     uploadSuccess = true;
-                                    console.log(`🎉 隐藏输入文件上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                    console.log(`🎉 隐藏输入逐个文件上传成功！`);
+                                    console.log(`   ✅ 策略${{i+1}}: ${{strategy.name}}`);
+                                    console.log(`   ✅ 成功上传: ${{Math.max(totalUploadItems, successfulUploads)}} 个文件`);
+                                    console.log(`   ✅ 预期上传: ${{finalFiles.length}} 个文件`);
+                                    
+                                    if (totalUploadItems < finalFiles.length && successfulUploads < finalFiles.length) {{
+                                        console.log(`⚠️ 注意: 部分文件上传成功，但未达到预期数量`);
+                                        console.log(`💡 可能原因: Element UI组件限制或浏览器文件处理限制`);
+                                    }}
+                                    
                                     console.log(`🛑 文件上传成功，停止其他策略尝试`);
                                     
                                     // 防止页面晃动
@@ -909,7 +877,11 @@ fn generate_connect_script(
                                     }});
                                     break; // 立即退出策略循环
                                 }} else {{
-                                    console.log(`⚠️ 策略${{i+1}}文件设置成功但未检测到上传项目`);
+                                    console.log(`❌ 策略${{i+1}}逐个文件处理完成，但未检测到任何上传项目`);
+                                    console.log(`🔍 可能的问题:`);
+                                    console.log(`   - 文件路径不正确或文件不存在`);
+                                    console.log(`   - Element UI组件未正确响应文件设置`);
+                                    console.log(`   - 上传组件选择器不匹配实际页面结构`);
                                 }}
                             }} else {{
                                 console.log(`❌ 策略${{i+1}}隐藏输入元素未找到`);
@@ -1181,16 +1153,21 @@ const fs = require('fs');
 test('Bilibili Appeal - Connect Mode with File Upload', async () => {{
     try {{
         console.log('🚀 开始自动化申诉流程...');
+        console.log('⏰ 脚本启动时间:', new Date().toISOString());
+        console.log('🔍 关键修复验证: 逐个文件上传机制已启用');
+        console.log('🎯 预期效果: 上传真实可查看的图片，支持多文件上传');
         console.log('🔧 Playwright脚本已启动并开始执行 - 如果你看到这条消息，说明JavaScript语法正确');
         const browser = await chromium.connectOverCDP('http://127.0.0.1:9222', {{ timeout: 15000 }});
         const context = browser.contexts()[0];
         const page = context.pages()[0] || await context.newPage();
         
+        console.log('\\n⏰ 阶段1开始时间:', new Date().toISOString());
         console.log('📄 导航到B站版权申诉页面...');
         console.log('🌐 页面导航开始 - 目标URL: https://www.bilibili.com/v/copyright/apply?origin=home');
         await page.goto('https://www.bilibili.com/v/copyright/apply?origin=home', {{ timeout: 60000, waitUntil: 'networkidle' }});
         console.log('✅ 页面导航完成，开始填写表单...');
 
+        console.log('\\n⏰ 阶段2开始时间:', new Date().toISOString());
         console.log('✏️ 开始填写个人信息...');
         await page.locator('input[placeholder="真实姓名"].el-input__inner').first().fill({name});
         await page.locator('input[placeholder="手机号"].el-input__inner').first().fill({phone});
@@ -1198,6 +1175,8 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {{
         await page.locator('input[placeholder="证件号码"].el-input__inner').first().fill({id_card});
         console.log('✓ 个人信息填写完成');
 
+        console.log('\\n⏰ 阶段3开始时间:', new Date().toISOString());
+        console.log('🔥 关键阶段：身份证文件上传开始...');
         {id_card_upload_section}
         
         console.log('⏳ 等待用户完成人工验证...');
