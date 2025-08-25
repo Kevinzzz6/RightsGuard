@@ -296,6 +296,7 @@ fn generate_connect_script(
         format!(r#"
         console.log('🆔 开始上传真实身份证文件（来自个人档案配置）...');
         console.log('📁 身份证文件列表:', [{}]);
+        console.log('🚦 文件上传模块启动 - 即将开始上传流程...');
         
         try {{
             const idCardFiles = [{}];
@@ -380,23 +381,111 @@ fn generate_connect_script(
                 console.error('❌ DOM分析失败:', domError.message);
             }}
             
-            // 🎯 基于新Playwright录制的精确方法
+            // 🎯 优化策略顺序 - 优先使用不依赖文件选择器的方法
             const selectorStrategies = [
-                // 策略1: 新Playwright录制 - 先点击加号图标，再设置文件
-                {{ selector: 'form i:nth-child(2)', uploadSelector: '.el-upload', type: 'icon_click', name: '表单加号图标点击' }},
-                // 策略2: 更通用的加号图标定位
-                {{ selector: 'form i', uploadSelector: '.el-upload', type: 'icon_click_all', name: '表单所有图标尝试' }},
-                // 策略3: 直接.el-upload方法（简化版）
-                {{ selector: '.el-upload', type: 'direct_simple', name: '直接el-upload上传' }},
-                // 策略4: 版权区域内的.el-upload
-                {{ selector: '.copyright-img-upload .el-upload', type: 'direct_simple', name: '版权区域el-upload' }},
-                // 策略5: 文件输入备选
-                {{ selector: '.el-upload__input', type: 'input', name: '文件输入备选' }},
-                // 策略6: FileChooser备选
-                {{ selector: '.el-upload', type: 'chooser', name: 'FileChooser备选' }}
+                // 策略1: 隐藏文件输入直接设置 - 最可靠，不检查可见性
+                {{ selector: '.el-upload__input', type: 'hidden_input', name: '隐藏文件输入直接设置' }},
+                // 策略2: 通用文件输入直接设置 - 需要检查可见性
+                {{ selector: 'input[type=\"file\"]', type: 'visible_input', name: '通用文件输入直接设置' }},
+                // 策略3: FileChooser API方法 - 如果支持的话，程序化设置
+                {{ selector: '.el-upload', type: 'chooser', name: 'FileChooser API设置' }},
+                // 策略4: 用户验证方法作为最后备用 - 可能打开选择界面
+                {{ selector: '.el-upload', type: 'fallback', name: '点击后直接设置（备用）' }}
             ];
             
-            console.log('🔍 开始6级智能选择器检测（基于Playwright录制）...');
+            console.log('🔍 开始4级智能选择器检测（隐藏输入优先，避免文件选择器依赖）...');
+            
+            // 🔍 增强文件验证和错误处理
+            console.log('📁 开始全面文件验证...');
+            let validFiles = [];
+            let fileValidationErrors = [];
+            
+            for (let i = 0; i < idCardFiles.length; i++) {{
+                const filePath = idCardFiles[i];
+                console.log(`\n🔍 验证文件${{i+1}}: ${{filePath}}`);
+                
+                try {{
+                    const fs = require('fs');
+                    const exists = fs.existsSync(filePath);
+                    
+                    if (exists) {{
+                        const stats = fs.statSync(filePath);
+                        const fileName = filePath.split(/[/\\\\]/).pop();
+                        const fileSize = stats.size;
+                        const isImage = /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(fileName);
+                        
+                        console.log(`✅ 文件${{i+1}}验证通过:`);
+                        console.log(`   📄 文件名: ${{fileName}}`);
+                        console.log(`   📊 文件大小: ${{fileSize}} bytes (${{(fileSize/1024/1024).toFixed(2)}} MB)`);
+                        console.log(`   🖼️ 图片格式: ${{isImage ? '是' : '否'}}`);
+                        console.log(`   📅 修改时间: ${{stats.mtime}}`);
+                        
+                        // 检查文件大小合理性
+                        if (fileSize === 0) {{
+                            console.log(`⚠️ 文件${{i+1}}大小为0，可能是空文件`);
+                            fileValidationErrors.push(`文件${{i+1}}为空文件`);
+                        }} else if (fileSize > 10 * 1024 * 1024) {{
+                            console.log(`⚠️ 文件${{i+1}}超过10MB，可能过大`);
+                        }}
+                        
+                        if (!isImage) {{
+                            console.log(`⚠️ 文件${{i+1}}可能不是图片格式`);
+                        }}
+                        
+                        validFiles.push(filePath);
+                        
+                    }} else {{
+                        console.log(`❌ 文件${{i+1}}不存在: ${{filePath}}`);
+                        fileValidationErrors.push(`文件${{i+1}}不存在: ${{filePath}}`);
+                        
+                        // 路径问题诊断
+                        console.log(`🔍 路径诊断:`);
+                        console.log(`   长度: ${{filePath.length}} 字符`);
+                        console.log(`   包含空格: ${{filePath.includes(' ') ? '是' : '否'}}`);
+                        console.log(`   包含中文: ${{/[\u4e00-\u9fa5]/.test(filePath) ? '是' : '否'}}`);
+                        
+                        // 尝试备选路径
+                        const altPaths = [
+                            filePath.replace(/\\\\/g, '/'),
+                            filePath.replace(/\\//g, '\\\\'),
+                            filePath.normalize()
+                        ];
+                        
+                        for (const altPath of altPaths) {{
+                            if (fs.existsSync(altPath)) {{
+                                console.log(`✅ 在备选路径找到文件: ${{altPath}}`);
+                                validFiles.push(altPath);
+                                break;
+                            }}
+                        }}
+                    }}
+                }} catch (fileError) {{
+                    console.error(`❌ 验证文件${{i+1}}时出错:`, fileError.message);
+                    fileValidationErrors.push(`文件${{i+1}}验证错误: ${{fileError.message}}`);
+                }}
+            }}
+            
+            // 验证结果总结
+            console.log(`\n📋 文件验证结果:`);
+            console.log(`   ✅ 有效文件: ${{validFiles.length}}/${{idCardFiles.length}}`);
+            console.log(`   ❌ 错误数量: ${{fileValidationErrors.length}}`);
+            
+            if (fileValidationErrors.length > 0) {{
+                console.log(`⚠️ 发现的问题:`);
+                fileValidationErrors.forEach((error, index) => {{
+                    console.log(`   ${{index + 1}}. ${{error}}`);
+                }});
+            }}
+            
+            if (validFiles.length === 0) {{
+                console.log(`❌ 没有找到有效的文件，无法继续上传`);
+                throw new Error(`没有找到有效的身份证文件。请检查个人档案中的文件配置。`);
+            }}
+            
+            // 使用验证通过的文件进行上传
+            console.log(`🚀 将使用${{validFiles.length}}个有效文件进行上传`);
+            const finalFiles = validFiles;
+            
             let uploadSuccess = false;
             
             for (let i = 0; i < selectorStrategies.length && !uploadSuccess; i++) {{
@@ -404,161 +493,9 @@ fn generate_connect_script(
                 console.log(`🎯 尝试策略${{i+1}}: ${{strategy.name}} (${{strategy.selector}})`);
                 
                 try {{
-                    if (strategy.type === 'icon_click') {{
-                        // 新录制方法: 先点击加号图标，再设置文件
-                        const iconElement = page.locator(strategy.selector).nth(1);
-                        const uploadElement = page.locator(strategy.uploadSelector).first();
-                        
-                        const iconVisible = await iconElement.isVisible({{ timeout: 3000 }});
-                        const uploadVisible = await uploadElement.isVisible({{ timeout: 3000 }});
-                        console.log(`   加号图标可见性: ${{iconVisible}}, 上传元素可见性: ${{uploadVisible}}`);
-                        
-                        if (iconVisible && uploadVisible) {{
-                            console.log(`🎯 使用新Playwright录制方法: 点击加号图标 + setInputFiles`);
-                            
-                            // 步骤1: 点击加号图标
-                            await iconElement.click();
-                            console.log(`👆 已点击加号图标: ${{strategy.selector}}`);
-                            
-                            // 步骤2: 设置文件到.el-upload
-                            await page.waitForTimeout(500);
-                            await uploadElement.setInputFiles(idCardFiles);
-                            console.log(`📁 已设置文件到上传元素`);
-                            
-                            console.log(`✅ 策略${{i+1}}加号点击方法完成: ${{strategy.name}}`);
-                            
-                            // 验证上传成功
-                            await page.waitForTimeout(3000);
-                            const uploadItems = await page.locator('.el-upload-list__item').count();
-                            console.log(`📊 检测到上传项目数量: ${{uploadItems}}`);
-                            
-                            if (uploadItems > 0) {{
-                                uploadSuccess = true;
-                                console.log(`🎉 加号点击方法上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
-                                console.log(`🛑 文件上传成功，停止其他策略尝试`);
-                                
-                                // 防止页面晃动 - 停止所有页面滚动和鼠标事件
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'hidden';
-                                    window.scrollTo(0, 0);
-                                }});
-                                await page.waitForTimeout(1000);
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'auto';
-                                }});
-                                break; // 立即退出策略循环
-                            }}
-                        }}
-                        
-                    }} else if (strategy.type === 'icon_click_all') {{
-                        // 尝试所有加号图标
-                        const iconElements = await page.locator(strategy.selector).all();
-                        const uploadElement = page.locator(strategy.uploadSelector).first();
-                        
-                        console.log(`   找到${{iconElements.length}}个图标元素`);
-                        
-                        for (let iconIndex = 0; iconIndex < iconElements.length; iconIndex++) {{
-                            try {{
-                                const icon = iconElements[iconIndex];
-                                const iconVisible = await icon.isVisible();
-                                if (iconVisible) {{
-                                    console.log(`🎯 尝试点击第${{iconIndex + 1}}个图标`);
-                                    await icon.click();
-                                    await page.waitForTimeout(500);
-                                    await uploadElement.setInputFiles(idCardFiles);
-                                    
-                                    await page.waitForTimeout(2000);
-                                    const uploadItems = await page.locator('.el-upload-list__item').count();
-                                    if (uploadItems > 0) {{
-                                        uploadSuccess = true;
-                                        console.log(`🎉 第${{iconIndex + 1}}个图标点击成功`);
-                                        console.log(`🛑 文件上传成功，停止策略尝试`);
-                                        
-                                        // 防止页面晃动 - 停止所有页面滚动
-                                        await page.evaluate(() => {{
-                                            document.body.style.overflow = 'hidden';
-                                            window.scrollTo(0, 0);
-                                        }});
-                                        await page.waitForTimeout(1000);
-                                        await page.evaluate(() => {{
-                                            document.body.style.overflow = 'auto';
-                                        }});
-                                        break; // 退出图标循环
-                                    }}
-                                }}
-                            }} catch (iconError) {{
-                                console.log(`❌ 第${{iconIndex + 1}}个图标点击失败: ${{iconError.message}}`);
-                            }}
-                        }}
-                        
-                    }} else if (strategy.type === 'direct_simple') {{
-                        // 简化的直接方法 - 只setInputFiles一次
-                        const uploadElement = page.locator(strategy.selector).first();
-                        const isVisible = await uploadElement.isVisible({{ timeout: 3000 }});
-                        console.log(`   上传元素可见性: ${{isVisible}}`);
-                        
-                        if (isVisible) {{
-                            console.log(`🎯 使用简化直接方法: 直接setInputFiles`);
-                            await uploadElement.setInputFiles(idCardFiles);
-                            console.log(`📁 已设置文件: ${{strategy.selector}}`);
-                            
-                            await page.waitForTimeout(3000);
-                            const uploadItems = await page.locator('.el-upload-list__item').count();
-                            console.log(`📊 检测到上传项目数量: ${{uploadItems}}`);
-                            
-                            if (uploadItems > 0) {{
-                                uploadSuccess = true;
-                                console.log(`🎉 简化直接方法上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
-                                console.log(`🛑 文件上传成功，停止其他策略尝试`);
-                                
-                                // 防止页面晃动
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'hidden';
-                                    window.scrollTo(0, 0);
-                                }});
-                                await page.waitForTimeout(1000);
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'auto';
-                                }});
-                                break; // 立即退出策略循环
-                            }}
-                        }}
-                        
-                    }} else if (strategy.type === 'input') {{
-                        // 直接文件输入策略
-                        const element = page.locator(strategy.selector).first();
-                        const isVisible = await element.isVisible({{ timeout: 3000 }});
-                        console.log(`   可见性: ${{isVisible}}`);
-                        
-                        if (isVisible) {{
-                            await element.setInputFiles(idCardFiles);
-                            console.log(`✅ 策略${{i+1}}成功: ${{strategy.name}}`);
-                            
-                            // 验证上传成功
-                            await page.waitForTimeout(2000);
-                            const uploadItems = await page.locator('.el-upload-list__item, .upload-list-item, .el-upload-list .el-upload-list__item').count();
-                            console.log(`📊 检测到上传项目数量: ${{uploadItems}}`);
-                            
-                            if (uploadItems > 0) {{
-                                uploadSuccess = true;
-                                console.log(`🎉 文件上传验证成功，使用策略${{i+1}}: ${{strategy.name}}`);
-                                console.log(`🛑 文件上传成功，停止其他策略尝试`);
-                                
-                                // 防止页面晃动
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'hidden';
-                                    window.scrollTo(0, 0);
-                                }});
-                                await page.waitForTimeout(1000);
-                                await page.evaluate(() => {{
-                                    document.body.style.overflow = 'auto';
-                                }});
-                                break; // 立即退出策略循环
-                            }}
-                        }}
-                        
-                    }} else if (strategy.type === 'chooser') {{
-                        // File Chooser API策略 - 优化版本
+                    if (strategy.type === 'chooser') {{
+                        // File Chooser API策略 - 增强版本，处理文件选择界面
+                        console.log(`🎯 使用FileChooser API方法`);
                         const trigger = page.locator(strategy.selector).first();
                         const isVisible = await trigger.isVisible({{ timeout: 3000 }});
                         console.log(`   上传触发器可见性: ${{isVisible}}`);
@@ -566,29 +503,35 @@ fn generate_connect_script(
                         if (isVisible) {{
                             console.log(`🎯 准备点击上传触发器: ${{strategy.selector}}`);
                             
-                            // 设置文件选择器监听 - 增加超时时间
-                            const fileChooserPromise = page.waitForEvent('filechooser', {{ timeout: 10000 }});
+                            // 设置文件选择器监听 - 增加超时时间并处理多个可能的事件
+                            const fileChooserPromise = page.waitForEvent('filechooser', {{ timeout: 15000 }});
                             
                             // 点击触发器
+                            console.log(`👆 点击上传触发器...`);
                             await trigger.click();
-                            console.log(`👆 已点击上传触发器，等待文件选择器...`);
+                            console.log(`⏳ 等待文件选择器事件...`);
                             
                             try {{
                                 const fileChooser = await fileChooserPromise;
-                                console.log(`📁 文件选择器已打开，设置文件:`, idCardFiles);
+                                console.log(`📁 FileChooser事件已触发！`);
+                                console.log(`🔍 FileChooser详细信息: isMultiple=${{fileChooser.isMultiple()}}`);
                                 
-                                await fileChooser.setFiles(idCardFiles);
-                                console.log(`✅ 策略${{i+1}}文件选择完成: ${{strategy.name}}`);
+                                // 设置文件 - 使用验证通过的文件
+                                console.log(`📂 开始设置${{finalFiles.length}}个验证通过的文件`);
+                                console.log(`📋 文件清单:`, finalFiles.map(f => f.split(/[/\\\\]/).pop()));
+                                await fileChooser.setFiles(finalFiles);
+                                console.log(`✅ FileChooser文件设置完成，避免了用户手动选择`);
                                 
-                                // 等待上传处理
-                                await page.waitForTimeout(4000);
+                                // 等待上传处理 - 增加等待时间
+                                console.log(`⏳ 等待文件上传和处理...`);
+                                await page.waitForTimeout(5000);
                                 
                                 // 验证上传成功 - 检查多种可能的上传成功指示器
                                 const uploadItemsVariants = [
                                     '.copyright-img-upload .el-upload-list__item',
                                     '.el-upload-list--picture-card .el-upload-list__item', 
                                     '.el-upload-list__item',
-                                    '[class*="upload-list"] [class*="item"]'
+                                    '[class*=\"upload-list\"] [class*=\"item\"]'
                                 ];
                                 
                                 let totalUploadItems = 0;
@@ -604,7 +547,7 @@ fn generate_connect_script(
                                 
                                 if (totalUploadItems > 0) {{
                                     uploadSuccess = true;
-                                    console.log(`🎉 文件上传验证成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                    console.log(`🎉 FileChooser方法上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
                                     
                                     // 防止页面晃动
                                     await page.evaluate(() => {{
@@ -615,12 +558,208 @@ fn generate_connect_script(
                                     await page.evaluate(() => {{
                                         document.body.style.overflow = 'auto';
                                     }});
+                                    break; // 立即退出策略循环
                                 }} else {{
-                                    console.log(`⚠️ 策略${{i+1}}文件选择成功但未检测到上传项目`);
+                                    console.log(`⚠️ 策略${{i+1}}FileChooser成功但未检测到上传项目`);
+                                    console.log(`🔍 可能需要等待更长时间或触发其他事件`);
                                 }}
                                 
                             }} catch (chooserError) {{
-                                console.log(`❌ 策略${{i+1}}文件选择器超时或失败: ${{chooserError.message}}`);
+                                console.log(`❌ 策略${{i+1}}FileChooser超时或失败: ${{chooserError.message}}`);
+                                console.log(`💡 FileChooser可能不被此页面支持，继续尝试其他方法`);
+                            }}
+                        }}
+                        
+                        
+                        
+                    }} else if (strategy.type === 'hidden_input') {{
+                        // 隐藏文件输入策略 - 不检查可见性，直接设置文件
+                        console.log(`🎯 使用隐藏输入策略，跳过可见性检查`);
+                        const element = page.locator(strategy.selector).first();
+                        
+                        try {{
+                            // 检查元素是否存在
+                            const elementCount = await element.count();
+                            console.log(`   隐藏输入元素数量: ${{elementCount}}`);
+                            
+                            if (elementCount > 0) {{
+                                console.log(`📁 直接设置文件到隐藏输入元素，无需检查可见性`);
+                                await element.setInputFiles(finalFiles);
+                                
+                                // 主动触发change事件确保页面响应
+                                await element.evaluate((input, files) => {{
+                                    const changeEvent = new Event('change', {{ bubbles: true }});
+                                    const inputEvent = new Event('input', {{ bubbles: true }});
+                                    input.dispatchEvent(changeEvent);
+                                    input.dispatchEvent(inputEvent);
+                                    console.log('✅ 已触发change和input事件');
+                                }}, finalFiles);
+                                
+                                console.log(`✅ 策略${{i+1}}文件设置完成: ${{strategy.name}}`);
+                                
+                                // 验证上传成功 - 延长等待时间
+                                console.log(`⏳ 等待隐藏输入处理完成...`);
+                                await page.waitForTimeout(4000);
+                                
+                                // 检查多种上传成功指示器
+                                const uploadItemsVariants = [
+                                    '.copyright-img-upload .el-upload-list__item',
+                                    '.el-upload-list--picture-card .el-upload-list__item', 
+                                    '.el-upload-list__item',
+                                    '[class*=\"upload-list\"] [class*=\"item\"]',
+                                    '.el-upload-list .el-upload-list__item'
+                                ];
+                                
+                                let totalUploadItems = 0;
+                                for (const variant of uploadItemsVariants) {{
+                                    const count = await page.locator(variant).count();
+                                    if (count > 0) {{
+                                        console.log(`📊 找到${{count}}个上传项目 (选择器: ${{variant}})`);
+                                        totalUploadItems = Math.max(totalUploadItems, count);
+                                    }}
+                                }}
+                                
+                                console.log(`📊 总上传项目数量: ${{totalUploadItems}}`);
+                                
+                                if (totalUploadItems > 0) {{
+                                    uploadSuccess = true;
+                                    console.log(`🎉 隐藏输入文件上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                    console.log(`🛑 文件上传成功，停止其他策略尝试`);
+                                    
+                                    // 防止页面晃动
+                                    await page.evaluate(() => {{
+                                        document.body.style.overflow = 'hidden';
+                                        window.scrollTo(0, 0);
+                                    }});
+                                    await page.waitForTimeout(1000);
+                                    await page.evaluate(() => {{
+                                        document.body.style.overflow = 'auto';
+                                    }});
+                                    break; // 立即退出策略循环
+                                }} else {{
+                                    console.log(`⚠️ 策略${{i+1}}文件设置成功但未检测到上传项目`);
+                                }}
+                            }} else {{
+                                console.log(`❌ 策略${{i+1}}隐藏输入元素未找到`);
+                            }}
+                        }} catch (hiddenError) {{
+                            console.log(`❌ 策略${{i+1}}隐藏输入处理失败: ${{hiddenError.message}}`);
+                        }}
+                        
+                    }} else if (strategy.type === 'visible_input') {{
+                        // 可见文件输入策略 - 需要检查可见性
+                        console.log(`🎯 使用可见输入策略，需要检查可见性`);
+                        const element = page.locator(strategy.selector).first();
+                        const isVisible = await element.isVisible({{ timeout: 3000 }});
+                        console.log(`   可见输入元素可见性: ${{isVisible}}`);
+                        
+                        if (isVisible) {{
+                            await element.setInputFiles(finalFiles);
+                            
+                            // 主动触发change事件
+                            await element.evaluate((input) => {{
+                                const changeEvent = new Event('change', {{ bubbles: true }});
+                                const inputEvent = new Event('input', {{ bubbles: true }});
+                                input.dispatchEvent(changeEvent);
+                                input.dispatchEvent(inputEvent);
+                                console.log('✅ 已触发change和input事件');
+                            }});
+                            
+                            console.log(`✅ 策略${{i+1}}成功: ${{strategy.name}}`);
+                            
+                            // 验证上传成功
+                            await page.waitForTimeout(3000);
+                            const uploadItems = await page.locator('.el-upload-list__item, .upload-list-item, .el-upload-list .el-upload-list__item').count();
+                            console.log(`📊 检测到上传项目数量: ${{uploadItems}}`);
+                            
+                            if (uploadItems > 0) {{
+                                uploadSuccess = true;
+                                console.log(`🎉 可见输入文件上传验证成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                console.log(`🛑 文件上传成功，停止其他策略尝试`);
+                                
+                                // 防止页面晃动
+                                await page.evaluate(() => {{
+                                    document.body.style.overflow = 'hidden';
+                                    window.scrollTo(0, 0);
+                                }});
+                                await page.waitForTimeout(1000);
+                                await page.evaluate(() => {{
+                                    document.body.style.overflow = 'auto';
+                                }});
+                                break; // 立即退出策略循环
+                            }}
+                        }}
+                        
+                    }} else if (strategy.type === 'fallback') {{
+                        // 备用方法: 点击.el-upload然后设置文件 (可能打开文件选择界面)
+                        console.log(`🎯 使用备用方法: 点击 + setInputFiles (可能显示选择器)`);
+                        const uploadElement = page.locator(strategy.selector).first();
+                        const isVisible = await uploadElement.isVisible({{ timeout: 3000 }});
+                        console.log(`   上传元素可见性: ${{isVisible}}`);
+                        
+                        if (isVisible) {{
+                            // 步骤1: 点击.el-upload触发上传界面
+                            await uploadElement.click();
+                            console.log(`👆 已点击上传元素: ${{strategy.selector}}`);
+                            console.log(`⏳ 等待文件选择界面加载完成...`);
+                            await page.waitForTimeout(1000); // 增加等待时间
+                            
+                            // 步骤2: 尝试多种方式设置文件
+                            console.log(`🔍 尝试多种文件设置方法...`);
+                            
+                            // 方法2a: 直接设置到原来的上传元素
+                            try {{
+                                await uploadElement.setInputFiles(finalFiles);
+                                console.log(`✅ 方法2a: 成功设置文件到原上传元素`);
+                            }} catch (error2a) {{
+                                console.log(`❌ 方法2a失败: ${{error2a.message}}`);
+                                
+                                // 方法2b: 寻找并设置到隐藏的文件输入元素
+                                try {{
+                                    const fileInput = page.locator('input[type="file"]').first();
+                                    const fileInputVisible = await fileInput.isVisible({{ timeout: 2000 }});
+                                    console.log(`🔍 文件输入元素可见性: ${{fileInputVisible}}`);
+                                    await fileInput.setInputFiles(finalFiles);
+                                    console.log(`✅ 方法2b: 成功设置文件到文件输入元素`);
+                                }} catch (error2b) {{
+                                    console.log(`❌ 方法2b失败: ${{error2b.message}}`);
+                                    
+                                    // 方法2c: 寻找.el-upload__input元素
+                                    try {{
+                                        const elUploadInput = page.locator('.el-upload__input').first();
+                                        await elUploadInput.setInputFiles(finalFiles);
+                                        console.log(`✅ 方法2c: 成功设置文件到.el-upload__input元素`);
+                                    }} catch (error2c) {{
+                                        console.log(`❌ 方法2c失败: ${{error2c.message}}`);
+                                        console.log(`❌ 所有文件设置方法均失败`);
+                                    }}
+                                }}
+                            }}
+                            
+                            // 等待上传处理并验证
+                            console.log(`⏳ 等待文件上传处理完成...`);
+                            await page.waitForTimeout(4000); // 增加等待时间
+                            const uploadItems = await page.locator('.el-upload-list__item').count();
+                            console.log(`📊 检测到上传项目数量: ${{uploadItems}}`);
+                            
+                            if (uploadItems > 0) {{
+                                uploadSuccess = true;
+                                console.log(`🎉 用户验证方法上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                console.log(`🛑 文件上传成功，停止其他策略尝试`);
+                                
+                                // 防止页面晃动
+                                await page.evaluate(() => {{
+                                    document.body.style.overflow = 'hidden';
+                                    window.scrollTo(0, 0);
+                                }});
+                                await page.waitForTimeout(1000);
+                                await page.evaluate(() => {{
+                                    document.body.style.overflow = 'auto';
+                                }});
+                                break; // 立即退出策略循环
+                            }} else {{
+                                console.log(`⚠️ 策略${{i+1}}文件界面打开成功但未检测到上传项目`);
+                                console.log(`🔍 继续尝试其他策略...`);
                             }}
                         }}
                     }}
@@ -631,7 +770,7 @@ fn generate_connect_script(
             }}
             
             if (!uploadSuccess) {{
-                console.log('⚠️ 所有6种选择器策略均未成功');
+                console.log('⚠️ 所有4种智能文件上传策略均未成功（隐藏输入→可见输入→FileChooser→备用方法）');
                 
                 // 🔍 增强调试信息 - DOM结构分析
                 console.log('🔍 开始页面DOM结构分析...');
@@ -770,12 +909,15 @@ const fs = require('fs');
 test('Bilibili Appeal - Connect Mode with File Upload', async () => {{
     try {{
         console.log('🚀 开始自动化申诉流程...');
+        console.log('🔧 Playwright脚本已启动并开始执行 - 如果你看到这条消息，说明JavaScript语法正确');
         const browser = await chromium.connectOverCDP('http://127.0.0.1:9222', {{ timeout: 15000 }});
         const context = browser.contexts()[0];
         const page = context.pages()[0] || await context.newPage();
         
         console.log('📄 导航到B站版权申诉页面...');
+        console.log('🌐 页面导航开始 - 目标URL: https://www.bilibili.com/v/copyright/apply?origin=home');
         await page.goto('https://www.bilibili.com/v/copyright/apply?origin=home', {{ timeout: 60000, waitUntil: 'networkidle' }});
+        console.log('✅ 页面导航完成，开始填写表单...');
 
         console.log('✏️ 开始填写个人信息...');
         await page.locator('input[placeholder="真实姓名"].el-input__inner').first().fill({name});
@@ -980,8 +1122,10 @@ fn get_absolute_file_paths(file_paths_json: &Option<String>) -> Result<Vec<Strin
                     if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
                         let abs_path = app_data_dir.join(relative_path);
                         if abs_path.exists() {
-                            absolute_paths.push(abs_path.to_string_lossy().to_string());
-                            tracing::info!("Resolved file path: {} -> {}", relative_path, abs_path.display());
+                            // 确保Windows路径格式统一 - 全部使用反斜杠
+                            let normalized_path = abs_path.to_string_lossy().replace('/', "\\");
+                            absolute_paths.push(normalized_path.clone());
+                            tracing::info!("Resolved file path: {} -> {} (normalized: {})", relative_path, abs_path.display(), normalized_path);
                         } else {
                             tracing::warn!("File does not exist: {}", abs_path.display());
                         }
@@ -1015,35 +1159,42 @@ fn get_absolute_file_paths(file_paths_json: &Option<String>) -> Result<Vec<Strin
                                     
                                     for search_path in &search_paths {
                                         if search_path.exists() {
-                                            absolute_paths.push(search_path.to_string_lossy().to_string());
-                                            tracing::info!("Found corresponding file in app data: {} -> {}", relative_path, search_path.display());
+                                            // 确保Windows路径格式统一
+                                            let normalized_path = search_path.to_string_lossy().replace('/', "\\");
+                                            absolute_paths.push(normalized_path.clone());
+                                            tracing::info!("Found corresponding file in app data: {} -> {} (normalized: {})", relative_path, search_path.display(), normalized_path);
                                             found_in_app_data = true;
                                             break;
                                         }
                                     }
                                 }
                                 
-                                // If not found in app data, use original absolute path
+                                // If not found in app data, use original absolute path with normalization
                                 if !found_in_app_data {
-                                    absolute_paths.push(relative_path.clone());
-                                    tracing::info!("Using existing absolute path (not found in app data): {}", relative_path);
+                                    let normalized_path = relative_path.replace('/', "\\");
+                                    absolute_paths.push(normalized_path.clone());
+                                    tracing::info!("Using existing absolute path (not found in app data): {} (normalized: {})", relative_path, normalized_path);
                                 }
                             } else {
-                                // Already in app data directory
-                                absolute_paths.push(relative_path.clone());
-                                tracing::info!("Using existing absolute path: {}", relative_path);
+                                // Already in app data directory - normalize path
+                                let normalized_path = relative_path.replace('/', "\\");
+                                absolute_paths.push(normalized_path.clone());
+                                tracing::info!("Using existing absolute path: {} (normalized: {})", relative_path, normalized_path);
                             }
                         } else {
-                            absolute_paths.push(relative_path.clone());
-                            tracing::info!("Using existing absolute path: {}", relative_path);
+                            let normalized_path = relative_path.replace('/', "\\");
+                            absolute_paths.push(normalized_path.clone());
+                            tracing::info!("Using existing absolute path: {} (normalized: {})", relative_path, normalized_path);
                         }
                     } else {
-                        absolute_paths.push(relative_path.clone());
-                        tracing::info!("Using existing absolute path: {}", relative_path);
+                        let normalized_path = relative_path.replace('/', "\\");
+                        absolute_paths.push(normalized_path.clone());
+                        tracing::info!("Using existing absolute path: {} (normalized: {})", relative_path, normalized_path);
                     }
                 } else {
-                    absolute_paths.push(relative_path.clone());
-                    tracing::info!("Using existing absolute path: {}", relative_path);
+                    let normalized_path = relative_path.replace('/', "\\");
+                    absolute_paths.push(normalized_path.clone());
+                    tracing::info!("Using existing absolute path: {} (normalized: {})", relative_path, normalized_path);
                 }
             } else {
                 tracing::warn!("Absolute file path does not exist: {}", relative_path);

@@ -285,10 +285,280 @@ for (let i = 0; i < idCardFiles.length; i++) {
 }
 ```
 
+## ✅ Phase 1.10: 基于用户反馈的选择器优化 (已完成)
+
+### 🎯 关键修复内容:
+1. **上传按钮选择器更新**:
+   - 基于用户建议，优先使用 `.el-upload` 点击方式
+   - 重新排序策略优先级，将FileChooser方法放在首位
+   - 移除复杂的图标点击策略，简化为直接点击上传区域
+
+2. **策略数组优化**:
+   ```javascript
+   const selectorStrategies = [
+       // 策略1: 用户建议的标准方法 - 直接点击.el-upload
+       { selector: '.el-upload', type: 'chooser', name: '标准el-upload点击上传' },
+       // 策略2: 版权区域内的.el-upload点击  
+       { selector: '.copyright-img-upload .el-upload', type: 'chooser', name: '版权区域el-upload点击' },
+       // 其他备选策略...
+   ];
+   ```
+
+3. **增强文件诊断**:
+   - 添加文件存在性验证日志
+   - 检查文件大小和修改时间
+   - 提供详细的文件状态信息便于调试
+
+### 🔍 调试功能增强:
+```javascript
+// 文件存在性验证
+for (let i = 0; i < idCardFiles.length; i++) {
+    const filePath = idCardFiles[i];
+    const fs = require('fs');
+    const exists = fs.existsSync(filePath);
+    const stats = exists ? fs.statSync(filePath) : null;
+    console.log(`📄 文件${i+1}: ${exists ? '✅存在' : '❌不存在'} - ${filePath}`);
+    if (exists && stats) {
+        console.log(`📊 文件大小: ${stats.size} bytes, 修改时间: ${stats.mtime}`);
+    }
+}
+```
+
+## ✅ Phase 1.11: 路径格式和策略优化 (已完成)
+
+### 🎯 核心修复内容:
+
+#### 1. Windows路径格式标准化 ✅
+- **问题**: 路径混合了正反斜杠 `C:\Users\...\files/profiles/...`
+- **解决**: 在 `get_absolute_file_paths` 函数中统一使用反斜杠
+- **实现**: 
+  ```rust
+  let normalized_path = abs_path.to_string_lossy().replace('/', "\\");
+  absolute_paths.push(normalized_path.clone());
+  tracing::info!("Resolved file path: {} (normalized: {})", relative_path, normalized_path);
+  ```
+
+#### 2. 上传策略大幅简化 ✅
+- **优化前**: 6种复杂策略 (icon_click, icon_click_all, chooser等)
+- **优化后**: 3种核心策略，专注用户验证有效的方法:
+  ```javascript
+  const selectorStrategies = [
+      { selector: '.el-upload', type: 'chooser', name: '标准el-upload点击上传' },
+      { selector: '.el-upload', type: 'direct_simple', name: '直接el-upload设置文件' },
+      { selector: '.el-upload__input', type: 'input', name: '隐藏文件输入元素' }
+  ];
+  ```
+
+#### 3. 增强文件路径调试 ✅
+- **路径存在性验证**: 检查文件大小、修改时间
+- **路径格式分析**: 检测长度、空格、中文字符
+- **备选路径尝试**: 自动测试不同路径格式变体
+- **详细错误诊断**: 提供完整的文件访问故障排查信息
+
+### 🔍 新增调试功能:
+```javascript
+// 路径问题诊断
+if (!exists) {
+    console.log(`🔍 路径分析: 长度=${filePath.length}, 包含空格=${filePath.includes(' ')}, 包含中文=${/[\u4e00-\u9fa5]/.test(filePath)}`);
+    // 尝试不同的路径格式
+    const altPaths = [
+        filePath.replace(/\\\\/g, '/'),   // 反斜杠改正斜杠
+        filePath.replace(/\\//g, '\\\\'), // 正斜杠改反斜杠  
+        filePath.normalize()              // 标准化路径
+    ];
+}
+```
+
 ### ✅ 编译状态
 - 所有Rust代码编译通过 ✅
 - JavaScript模板语法正确 ✅
 - 格式字符串参数匹配 ✅
+- 用户反馈集成完成 ✅
+- 路径格式标准化完成 ✅
+- 策略简化优化完成 ✅
+
+## ✅ Phase 1.12: 解决文件上传界面消失问题 (已完成)
+
+### 🔍 问题根因分析:
+通过检查生成的JavaScript脚本发现关键问题：
+1. **重复chooser策略处理**: 同一个strategy.type被处理两次，第二次永远不会执行
+2. **缺少用户验证有效的方法**: 缺少基于手动录制的icon_click策略
+3. **策略数量提示错误**: 错误显示"6种策略"实际只有3种
+
+### 🎯 实施的修复:
+
+#### 1. 删除重复的chooser策略处理 ✅
+- **问题**: 第162行和第297行都处理 `strategy.type === 'chooser'`
+- **解决**: 删除了重复的第二个chooser处理块
+- **影响**: 现在每种策略类型只会被处理一次
+
+#### 2. 恢复用户验证有效的icon_click策略 ✅
+- **新增策略**: 基于你的手动录制验证，添加icon_click类型
+- **实现方式**: 先点击`.el-upload`，然后设置文件
+- **代码实现**:
+  ```javascript
+  // 步骤1: 点击.el-upload触发上传
+  await uploadElement.click();
+  await page.waitForTimeout(500);
+  
+  // 步骤2: 直接设置文件到同一个元素  
+  await uploadElement.setInputFiles(idCardFiles);
+  ```
+
+#### 3. 策略数组优化 ✅
+- **优化前**: 3种策略但缺少有效方法
+- **优化后**: 4种策略，第一位是用户验证的方法:
+  ```javascript
+  const selectorStrategies = [
+      { selector: '.el-upload', type: 'icon_click', name: '用户验证点击+设置方法' },
+      { selector: '.el-upload', type: 'chooser', name: '标准FileChooser点击上传' },
+      { selector: '.el-upload', type: 'direct_simple', name: '直接el-upload设置文件' },
+      { selector: '.el-upload__input', type: 'input', name: '隐藏文件输入元素' }
+  ];
+  ```
+
+#### 4. 增强执行确认日志 ✅
+- **脚本启动确认**: 添加JavaScript语法正确性验证日志
+- **页面导航跟踪**: 详细记录每个导航步骤
+- **文件上传流程标记**: 清晰标识上传模块的启动
+
+### ✅ 预期改进效果:
+- **恢复文件上传界面**: icon_click策略应该能重新打开文件选择界面
+- **提高上传成功率**: 第一个策略基于用户验证的有效方法
+- **更好的调试体验**: 详细日志帮助定位问题位置
+- **消除重复处理**: 每种策略类型只处理一次，避免混乱
+
+### 🔍 测试要点:
+现在再次运行 `npm run dev:tauri` 时，应该能看到：
+1. "Playwright脚本已启动并开始执行" - 确认JavaScript语法正确
+2. "用户验证点击+设置方法" - 第一个策略尝试
+3. 文件选择界面应该能正常打开
+
+## ✅ Phase 1.13: 优化文件上传方式 - 避免文件选择器依赖 (已完成)
+
+### 🔍 用户反馈问题:
+用户指出关键问题：当前的 `click() + setInputFiles()` 方式会打开系统文件选择器，但显示的默认位置不可预测，依赖于上次访问的目录，导致用户体验不一致。
+
+### 🎯 实施的优化:
+
+#### 1. 策略优先级重新排序 ✅
+**优化前**: 优先使用点击方法，可能打开文件选择界面
+**优化后**: 优先使用隐藏输入，完全避免用户交互
+```javascript
+const selectorStrategies = [
+    { selector: '.el-upload__input', type: 'input', name: '隐藏文件输入直接设置' },     // 🥇 最优先
+    { selector: 'input[type="file"]', type: 'input', name: '通用文件输入直接设置' },    // 🥈 备用
+    { selector: '.el-upload', type: 'chooser', name: 'FileChooser API设置' },         // 🥉 程序化
+    { selector: '.el-upload', type: 'fallback', name: '点击后直接设置（备用）' }        // 🔧 最后备用
+];
+```
+
+#### 2. 增强隐藏输入处理 ✅
+- **不检查可见性**: 隐藏元素通常不可见，直接检查存在性
+- **触发change事件**: 设置文件后主动触发change事件确保处理
+- **详细日志**: 记录每个步骤的执行结果
+
+#### 3. 全面文件验证系统 ✅
+**新增功能**:
+- 文件存在性检查
+- 文件大小和格式验证
+- 图片格式识别
+- 路径问题诊断
+- 备选路径尝试
+- 验证结果汇总
+
+**代码实现**:
+```javascript
+// 验证每个文件的详细信息
+const fileName = filePath.split(/[/\\]/).pop();
+const fileSize = stats.size;
+const isImage = /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(fileName);
+console.log(`📄 文件名: ${fileName}`);
+console.log(`📊 文件大小: ${fileSize} bytes (${(fileSize/1024/1024).toFixed(2)} MB)`);
+```
+
+#### 4. FileChooser API优化 ✅
+- **程序化设置**: 在FileChooser事件中直接设置预定义文件
+- **避免用户选择**: 用户不需要手动浏览和选择文件
+- **文件清单显示**: 详细记录设置的文件信息
+
+### ✅ 预期改进效果:
+- **无用户交互上传**: 优先使用隐藏输入，用户看不到文件选择过程
+- **可靠的文件路径**: 直接使用应用数据目录中的预设文件
+- **详细的错误诊断**: 如果失败，提供具体的问题定位信息
+- **渐进式降级**: 如果隐藏输入不工作，自动尝试其他方法
+
+### 🔍 新的测试要点:
+现在运行时应该看到：
+1. "📁 开始全面文件验证..." - 详细的文件状态检查
+2. "✅ 有效文件: X/Y" - 验证结果汇总
+3. "🎯 使用隐藏输入直接设置方法" - 第一优先策略
+4. "📂 直接设置文件到隐藏输入元素，无需用户交互" - 透明上传过程
+
+## ✅ Phase 1.14: 隐藏输入元素可见性问题修复 (已完成)
+
+### 🔍 用户反馈的核心问题:
+用户报告："think hard 目前仍然是打开了文件上传界面但是没有真的上传"，即界面能打开但文件无法真正设置。
+
+### 🎯 根本原因分析:
+**问题根源**: 当前的 `input` 策略对所有输入元素都检查可见性，但 `.el-upload__input` 隐藏元素本来就不可见，导致策略被错误跳过。
+
+```javascript
+// 问题代码
+if (strategy.type === 'input') {
+    const isVisible = await element.isVisible({ timeout: 3000 });
+    if (isVisible) { // 隐藏输入永远不会执行到这里
+        await element.setInputFiles(files);
+    }
+}
+```
+
+### 🔧 实施的修复:
+
+#### 1. 策略类型重新设计 ✅
+- **修改前**: 统一的 `input` 类型，对所有输入检查可见性
+- **修改后**: 分离为 `hidden_input` 和 `visible_input` 两种类型
+```rust
+{ selector: '.el-upload__input', type: 'hidden_input', name: '隐藏文件输入直接设置' },
+{ selector: 'input[type="file"]', type: 'visible_input', name: '通用文件输入直接设置' },
+```
+
+#### 2. 隐藏输入专用处理逻辑 ✅
+- **跳过可见性检查**: 隐藏输入元素直接检查存在性，不检查可见性
+- **主动事件触发**: 设置文件后主动触发 `change` 和 `input` 事件
+- **增强上传验证**: 检查5种不同的上传成功指示器
+```javascript
+// 新的隐藏输入处理
+await element.setInputFiles(finalFiles);
+await element.evaluate((input) => {
+    const changeEvent = new Event('change', { bubbles: true });
+    const inputEvent = new Event('input', { bubbles: true });
+    input.dispatchEvent(changeEvent);
+    input.dispatchEvent(inputEvent);
+});
+```
+
+#### 3. 多层次上传成功验证 ✅
+- **扩展指示器检查**: 从3种扩展到5种上传成功指示器
+- **延长等待时间**: 隐藏输入处理等待4秒而不是2秒
+- **详细状态反馈**: 每种指示器的检查结果都有详细日志
+
+#### 4. 优化错误处理和调试 ✅
+- **策略执行日志**: 每种策略类型都有专用的执行路径和日志
+- **失败原因分析**: 区分元素未找到、不可见、事件触发失败等不同情况
+- **统一错误消息**: 更新为反映4种智能策略的完整流程
+
+### 🎯 预期效果:
+1. **隐藏输入优先**: `.el-upload__input` 元素不再受可见性检查阻碍
+2. **事件正确触发**: 文件设置后页面能正确响应change事件
+3. **上传状态准确**: 多种指示器确保上传成功状态被正确检测
+4. **调试信息丰富**: 详细的执行日志便于问题诊断
+
+### ✅ 技术改进总结:
+- 移除了错误的 `direct_simple` 策略处理
+- 修正了隐藏元素的可见性检查逻辑错误
+- 添加了DOM事件触发机制确保页面响应
+- 实现了更准确的上传成功验证系统
 
 ## 🚀 完整文件上传修复系统已全面完成！
 **现在具备的功能:**
