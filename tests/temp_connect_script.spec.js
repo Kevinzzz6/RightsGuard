@@ -22,7 +22,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         console.log('\\n⏰ 阶段2开始时间:', new Date().toISOString());
         console.log('✏️ 开始填写个人信息...');
         await page.locator('input[placeholder="真实姓名"].el-input__inner').first().fill("Test User");
-        await page.locator('input[placeholder="手机号"].el-input__inner').first().fill("13800138000");
+        await page.locator('input[placeholder="手机号"].el-input__inner').first().fill("13798396696");
         await page.locator('.el-form-item:has-text("邮箱") input.el-input__inner').first().fill("test@example.com");
         await page.locator('input[placeholder="证件号码"].el-input__inner').first().fill("110101199001011234");
         console.log('✓ 个人信息填写完成');
@@ -761,68 +761,290 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
             console.error('❌ 身份证文件上传整体失败: ', error);
         }
         
-        console.log('⏳ 等待用户完成人工验证...');
-        fs.writeFileSync("C:\\Users\\kevin\\Desktop\\Code\\RG\\waiting_for_verification.txt", 'waiting');
-        while (true) {
-            if (fs.existsSync("C:\\Users\\kevin\\Desktop\\Code\\RG\\verification_completed.txt")) {
-                fs.unlinkSync("C:\\Users\\kevin\\Desktop\\Code\\RG\\verification_completed.txt");
-                fs.unlinkSync("C:\\Users\\kevin\\Desktop\\Code\\RG\\waiting_for_verification.txt");
-                break;
+        console.log('⏳ 等待用户完成验证码并进入下一页...');
+        console.log('💡 请在页面中输入验证码并点击下一步');
+        
+        // 等待IP资产页面的关键元素出现，最多等待5分钟
+        console.log('🔍 正在检测IP资产页面加载...');
+        await page.waitForSelector('.el-form-item:has-text("权利人")', { 
+            timeout: 300000 
+        });
+        
+        console.log('✅ 检测到IP资产页面，开始自动填写...');
+        await page.waitForTimeout(2000);
+        
+        // 执行完整的IP资产信息填写和文件上传
+        
+        console.log('\\n⏰ 阶段4开始时间:', new Date().toISOString());
+        console.log('📋 开始填写完整IP资产信息...');
+        
+        // 填写权利人 - 使用智能选择器策略
+        console.log('👤 开始填写权利人信息...');
+        
+        // 🔍 第一步：分析权利人字段DOM结构
+        console.log('🔍 分析权利人字段DOM结构...');
+        try {
+            const rightsHolderSection = page.locator('.el-form-item:has-text("权利人")');
+            const sectionExists = await rightsHolderSection.count();
+            console.log(`📊 权利人表单项数量: ${sectionExists}`);
+            
+            if (sectionExists > 0) {
+                const allInputs = await rightsHolderSection.locator('input').all();
+                console.log(`🔍 权利人字段包含 ${allInputs.length} 个input元素:`);
+                
+                for (let i = 0; i < Math.min(allInputs.length, 5); i++) {
+                    const inputType = await allInputs[i].getAttribute('type') || 'text';
+                    const inputClass = await allInputs[i].getAttribute('class') || '';
+                    const inputValue = await allInputs[i].getAttribute('value') || '';
+                    const isVisible = await allInputs[i].isVisible();
+                    console.log(`  Input[${i}]: type=${inputType}, class="${inputClass}", value="${inputValue}", visible=${isVisible}`);
+                }
             }
-            await page.waitForTimeout(1000);
+        } catch (domError) {
+            console.log('⚠️ DOM分析失败:', domError.message);
         }
-        console.log('✓ 人工验证已完成');
         
-        await page.locator('button:has-text("下一步")').first().click();
-        await page.waitForTimeout(2000);
+        // 🎯 第二步：使用多重选择器策略填写权利人
+        const rightsHolderStrategies = [
+            { selector: '.el-form-item:has-text("权利人") input[type="text"]', name: '文本输入框(type=text)' },
+            { selector: '.el-form-item:has-text("权利人") .el-input__inner', name: 'Element UI输入框(.el-input__inner)' },
+            { selector: '.el-form-item:has-text("权利人") input:not([type="radio"]):not([type="checkbox"])', name: '非单选按钮输入框' },
+            { selector: '.el-form-item:has-text("权利人") textarea', name: '文本域' },
+            { selector: '.el-form-item:has-text("权利人") [contenteditable="true"]', name: '可编辑内容元素' }
+        ];
         
-        // This is now safe, as ip_section is either a valid block of code or an empty string.
+        let rightsHolderFilled = false;
         
-        console.log('开始填写IP资产信息...');
-        await page.locator('.el-form-item:has-text("权利人") input.el-input__inner').first().fill("酷酷酷");
-        await page.locator('.el-form-item:has-text("著作类型") .el-select').first().click();
+        for (let i = 0; i < rightsHolderStrategies.length && !rightsHolderFilled; i++) {
+            const strategy = rightsHolderStrategies[i];
+            console.log(`🎯 尝试策略${i+1}: ${strategy.name} (${strategy.selector})`);
+            
+            try {
+                const element = page.locator(strategy.selector);
+                const count = await element.count();
+                console.log(`   元素数量: ${count}`);
+                
+                if (count > 0) {
+                    const firstElement = element.first();
+                    const isVisible = await firstElement.isVisible({ timeout: 2000 });
+                    const isEnabled = await firstElement.isEnabled();
+                    console.log(`   第一个元素: visible=${isVisible}, enabled=${isEnabled}`);
+                    
+                    if (isVisible && isEnabled) {
+                        await firstElement.fill("酷酷酷");
+                        console.log(`✅ 权利人填写成功! 使用策略: ${strategy.name}`);
+                        rightsHolderFilled = true;
+                        
+                        // 验证填写是否成功
+                        await page.waitForTimeout(500);
+                        const filledValue = await firstElement.inputValue().catch(() => '');
+                        console.log(`🔍 验证填写结果: "${filledValue}"`);
+                    } else {
+                        console.log(`   ⚠️ 元素不可见或不可用`);
+                    }
+                }
+            } catch (strategyError) {
+                console.log(`   ❌ 策略${i+1}失败: ${strategyError.message}`);
+            }
+        }
+        
+        if (!rightsHolderFilled) {
+            console.error('❌ 所有权利人填写策略都失败了');
+            console.log('🔍 建议手动检查页面结构或联系开发者');
+        } else {
+            console.log('✅ 权利人信息填写完成');
+        }
+        
+        // 填写授权期限 - 起始时间和结束时间
+        if (true && true) {
+            console.log('📅 设置授权期限...');
+            await page.locator('div').filter({ hasText: /^授权期限/ }).getByPlaceholder('起始时间').click();
+            // 等待日期选择器打开，然后选择日期 (暂时使用简化处理)
+            await page.waitForTimeout(500);
+            await page.keyboard.type("2025-08-06");
+            await page.keyboard.press('Tab');
+            
+            await page.locator('div').filter({ hasText: /^授权期限/ }).getByPlaceholder('结束时间').click();
+            await page.waitForTimeout(500);
+            await page.keyboard.type("2025-08-21");
+            await page.keyboard.press('Tab');
+        }
+        
+        // 著作类型选择
+        console.log('🎨 选择著作类型...');
+        await page.locator('div').filter({ hasText: /^著作类型/ }).getByPlaceholder('请选择').click();
         await page.waitForTimeout(500);
-        await page.locator('.el-select-dropdown__item:has-text("视频")').first().click();
-        await page.locator('.el-form-item:has-text("著作名称") input.el-input__inner').first().fill("大大");
-        console.log('✓ IP资产信息填写完成');
-        await page.locator('button:has-text("下一步")').first().click();
-        await page.waitForTimeout(2000);
-
-
+        await page.getByRole('listitem').filter({ hasText: "视频" }).click();
+        
+        // 填写著作名称 - 使用安全选择器策略
+        console.log('📝 开始填写著作名称...');
+        const workNameStrategies = [
+            { selector: '.el-form-item:has-text("著作名称") input[type="text"]', name: '文本输入框' },
+            { selector: '.el-form-item:has-text("著作名称") .el-input__inner', name: 'Element UI输入框' },
+            { selector: 'div:has-text("著作名称") input:not([type="radio"]):not([type="checkbox"])', name: '非单选按钮输入框' },
+            { selector: 'div:has-text("著作名称") [role="textbox"]', name: '角色为textbox的元素' }
+        ];
+        
+        let workNameFilled = false;
+        for (let i = 0; i < workNameStrategies.length && !workNameFilled; i++) {
+            const strategy = workNameStrategies[i];
+            try {
+                const element = page.locator(strategy.selector);
+                const count = await element.count();
+                if (count > 0 && await element.first().isVisible({ timeout: 1000 })) {
+                    await element.first().fill("大大");
+                    console.log(`✅ 著作名称填写成功! 使用: ${strategy.name}`);
+                    workNameFilled = true;
+                }
+            } catch (error) {
+                console.log(`⚠️ 著作名称策略${i+1}失败: ${error.message}`);
+            }
+        }
+        
+        if (!workNameFilled) {
+            console.error('❌ 著作名称填写失败，尝试备用方法...');
+            try {
+                await page.locator('div').filter({ hasText: /^著作名称/ }).getByRole('textbox').fill("大大");
+                console.log('✅ 著作名称填写成功 (备用方法)');
+            } catch (backupError) {
+                console.error('❌ 著作名称备用方法也失败:', backupError.message);
+            }
+        }
+        
+        // 地区选择 (默认中国大陆) - 使用精确选择器
+        console.log('🌏 开始设置地区...');
+        const regionStrategies = [
+            { selector: '.el-form-item:has-text("地区") .el-select', name: '地区表单项内的下拉选择框' },
+            { selector: '.el-form-item:has-text("地区") .el-input', name: '地区表单项内的输入框' },
+            { selector: 'div:has-text("地区") [role="textbox"]', name: '地区相关的textbox角色元素' },
+            { selector: '.el-form-item:has-text("地区") .el-input__inner', name: '地区表单项内的输入核心元素' }
+        ];
+        
+        let regionSelected = false;
+        for (let i = 0; i < regionStrategies.length && !regionSelected; i++) {
+            const strategy = regionStrategies[i];
+            try {
+                const element = page.locator(strategy.selector);
+                const count = await element.count();
+                console.log(`🔍 地区策略${i+1}: 找到${count}个元素 (${strategy.name})`);
+                
+                if (count > 0) {
+                    const firstElement = element.first();
+                    const isVisible = await firstElement.isVisible({ timeout: 1000 });
+                    if (isVisible) {
+                        console.log(`👆 点击地区选择器: ${strategy.name}`);
+                        await firstElement.click();
+                        await page.waitForTimeout(500);
+                        
+                        // 选择"中国大陆"选项
+                        const option = page.getByRole('listitem').filter({ hasText: '中国大陆' });
+                        const optionExists = await option.count();
+                        console.log(`🔍 "中国大陆"选项数量: ${optionExists}`);
+                        
+                        if (optionExists > 0) {
+                            await option.first().click();
+                            console.log('✅ 地区选择成功: 中国大陆');
+                            regionSelected = true;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log(`⚠️ 地区选择策略${i+1}失败: ${error.message}`);
+            }
+        }
+        
+        // 备用方法：使用原始选择器
+        if (!regionSelected) {
+            console.log('🔄 使用备用地区选择方法...');
+            try {
+                await page.getByRole('textbox', { name: '请选择' }).nth(1).click();
+                await page.waitForTimeout(500);
+                await page.getByRole('listitem').filter({ hasText: '中国大陆' }).click();
+                console.log('✅ 地区选择成功 (备用方法)');
+            } catch (backupError) {
+                console.error('❌ 地区选择备用方法失败:', backupError.message);
+            }
+        }
+        
+        // 填写期限 (作品有效期)
+        if (false && false) {
+            console.log('⏰ 设置作品期限...');
+            await page.locator('div').filter({ hasText: /^期限/ }).getByPlaceholder('起始时间').click();
+            await page.waitForTimeout(500);
+            await page.keyboard.type("");
+            await page.keyboard.press('Tab');
+            
+            await page.locator('div').filter({ hasText: /^期限/ }).getByPlaceholder('结束时间').click();
+            await page.waitForTimeout(500);
+            await page.keyboard.type("");
+            await page.keyboard.press('Tab');
+        }
+        
+        // 上传授权证明文件
         
         console.log('📋 开始上传授权证明文件...');
-        console.log('📁 文件列表:', ["屏幕截图 2025-07-20 120221.png"]);
-        
         try {
-            const authFiles = ["C:\\Users\\kevin\\Pictures\\Screenshots\\屏幕截图 2025-07-20 120221.png"];
-            const authFileInput = page.locator('.el-form-item:has-text("授权证明") input[type="file"]');
-            await page.waitForTimeout(1000); // Wait for form to be ready
+            const authFiles = ["C:\\Users\\kevin\\Pictures\\Screenshots\\屏幕截图 2025-07-20 120221.png", "C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\auth_docs\\test.png"];
+            console.log('📁 授权证明文件数量:', authFiles.length);
             
-            const isVisible = await authFileInput.isVisible({ timeout: 5000 });
-            console.log('🔍 授权证明文件上传控件可见性: ', isVisible);
+            // 使用更精确的选择器，基于用户录制的操作
+            const authUploadArea = page.locator('div:nth-child(3) > .el-form-item__content > .inline-form-item > .copyright-img-upload > div > .el-upload');
+            const uploadExists = await authUploadArea.count();
+            console.log('🔍 授权证明上传区域数量:', uploadExists);
             
-            if (isVisible) {
-                await authFileInput.setInputFiles(authFiles);
-                console.log('✅ 授权证明文件上传完成，文件数量:', authFiles.length);
-                
-                // Wait and check for upload success
-                await page.waitForTimeout(3000);
-                const uploadSuccess = await page.locator('.el-form-item:has-text("授权证明") .el-upload-list__item').count();
-                console.log('📊 上传成功文件数量: ', uploadSuccess);
-                
+            if (uploadExists > 0) {
+                await authUploadArea.first().setInputFiles(authFiles);
+                console.log('✅ 授权证明文件上传完成');
+                await page.waitForTimeout(2000); // 等待处理完成
             } else {
-                console.log('⚠️ 授权证明文件上传控件未找到');
-                // Alternative selector attempts
-                const altSelector1 = await page.locator('.el-form-item:has-text("授权") input[type="file"]').isVisible({ timeout: 1000 });
-                const altSelector2 = await page.locator('input[type="file"][accept*="image"]').count();
-                console.log('🔍 备用选择器1可见性: ', altSelector1);
-                console.log('🔍 图片文件输入数量: ', altSelector2);
+                console.log('⚠️ 未找到授权证明上传区域，尝试备用方法');
+                const backupSelector = page.locator('.el-form-item:has-text("授权证明") input[type="file"]');
+                const backupExists = await backupSelector.count();
+                if (backupExists > 0) {
+                    await backupSelector.first().setInputFiles(authFiles);
+                    console.log('✅ 授权证明文件上传完成 (备用方法)');
+                    await page.waitForTimeout(2000);
+                }
             }
         } catch (error) {
-            console.error('❌ 授权证明文件上传失败: ', error);
+            console.error('❌ 授权证明文件上传失败:', error);
         }
+        
+        // 上传作品证明文件  
+        
+        console.log('🏆 开始上传作品证明文件...');
+        try {
+            const workProofFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\proof_docs\\test.png"];
+            console.log('📁 作品证明文件数量:', workProofFiles.length);
+            
+            // 使用更精确的选择器，基于用户录制的操作
+            const workProofUploadArea = page.locator('.el-form-item.default-item > .el-form-item__content > .inline-form-item > .copyright-img-upload > div > .el-upload');
+            const uploadExists = await workProofUploadArea.count();
+            console.log('🔍 作品证明上传区域数量:', uploadExists);
+            
+            if (uploadExists > 0) {
+                await workProofUploadArea.first().setInputFiles(workProofFiles);
+                console.log('✅ 作品证明文件上传完成');
+                await page.waitForTimeout(2000); // 等待处理完成
+            } else {
+                console.log('⚠️ 未找到作品证明上传区域，尝试备用方法');
+                const backupSelector = page.locator('.el-form-item:has-text("证明")').last().locator('input[type="file"]');
+                const backupExists = await backupSelector.count();
+                if (backupExists > 0) {
+                    await backupSelector.setInputFiles(workProofFiles);
+                    console.log('✅ 作品证明文件上传完成 (备用方法)');
+                    await page.waitForTimeout(2000);
+                }
+            }
+        } catch (error) {
+            console.error('❌ 作品证明文件上传失败:', error);
+        }
+        
+        console.log('✅ IP资产完整信息填写完成');
+        console.log('👆 点击下一步按钮...');
+        await page.getByRole('button', { name: '下一步' }).click();
+        await page.waitForTimeout(2000);
 
-                console.log('ℹ️ 无作品证明文件需要上传');
         
         console.log('📝 填写申诉详情...');
         await page.locator('input[placeholder*="他人发布的B站侵权链接"]').first().fill("https://www.bilibili.com/video/BV1DfgzzrEd1");

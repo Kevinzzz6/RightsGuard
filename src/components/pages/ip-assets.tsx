@@ -18,6 +18,67 @@ const workTypes = ["视频", "音乐", "图片", "文章", "软件", "其他"];
 const regions = ["中国大陆", "香港", "澳门", "台湾", "美国", "日本", "韩国", "其他"];
 const equityTypes = ["著作权", "商标权", "专利权", "其他"];
 
+// 安全解析文件路径列表的函数 - 支持多种输入类型
+function safeParseFileList(fileData: any): string[] {
+  // 如果是空值，返回空数组
+  if (!fileData) {
+    return [];
+  }
+  
+  // 如果已经是数组，直接处理并过滤
+  if (Array.isArray(fileData)) {
+    return fileData
+      .filter(item => typeof item === 'string' && item.trim() !== '')
+      .map(item => item.trim());
+  }
+  
+  // 如果是字符串，按照原逻辑处理
+  if (typeof fileData === 'string') {
+    const cleanedData = fileData.trim();
+    if (cleanedData === '') {
+      return [];
+    }
+    
+    try {
+      // 尝试JSON解析
+      const parsed = JSON.parse(cleanedData);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter(item => typeof item === 'string' && item.trim() !== '')
+          .map(item => item.trim());
+      } else if (typeof parsed === 'string') {
+        return [parsed.trim()];
+      }
+    } catch {
+      // JSON解析失败，尝试其他格式
+    }
+    
+    // 尝试逗号分隔格式
+    if (cleanedData.includes(',')) {
+      return cleanedData.split(',')
+        .map(path => path.trim())
+        .filter(path => path !== '');
+    }
+    
+    // 单个文件路径
+    return [cleanedData];
+  }
+  
+  // 其他类型，尝试转换为字符串处理
+  try {
+    const stringified = String(fileData);
+    if (stringified && stringified !== '[object Object]' && stringified !== 'null' && stringified !== 'undefined') {
+      return safeParseFileList(stringified);
+    }
+  } catch (error) {
+    console.warn('Unable to convert fileData to string:', fileData, error);
+  }
+  
+  // 无法处理的情况，记录警告并返回空数组
+  console.warn('Unable to parse fileData, returning empty array:', fileData);
+  return [];
+}
+
 const initialFormState: Omit<IpAsset, 'id' | 'createdAt' | 'updatedAt'> = {
   isAgent: false,
   owner: "",
@@ -88,20 +149,25 @@ export function IpAssetsPage() {
     setEditingAsset(asset);
     setFormData({
       ...asset,
-      authFiles: asset.authFiles ? JSON.parse(asset.authFiles as any) : [],
-      workProofFiles: asset.workProofFiles ? JSON.parse(asset.workProofFiles as any) : []
+      authFiles: safeParseFileList(asset.authFiles),
+      workProofFiles: safeParseFileList(asset.workProofFiles)
     });
     setIsDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("确定要删除这个IP资产吗？")) {
+    if (window.confirm("确定要删除这个IP资产吗？\n\n⚠️ 注意：如果存在相关的案件记录，它们也会被一并删除。")) {
         try {
-            await tauriAPI.deleteIpAsset(id);
-            await tauriAPI.showMessage("成功", "IP资产已删除！");
+            console.log('[IP Assets] Attempting to delete asset with ID:', id);
+            const result = await tauriAPI.deleteIpAsset(id);
+            console.log('[IP Assets] Delete result:', result);
+            
+            await tauriAPI.showMessage("成功", "IP资产已删除！\n相关的案件记录（如有）也已一并删除。");
             await loadAssets();
         } catch (error) {
-            await tauriAPI.showMessage("错误", "删除失败");
+            console.error('[IP Assets] Delete error:', error);
+            const errorMessage = error instanceof Error ? error.message : '删除失败，未知错误';
+            await tauriAPI.showMessage("错误", errorMessage);
         }
     }
   };

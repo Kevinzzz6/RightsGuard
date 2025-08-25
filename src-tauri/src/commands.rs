@@ -78,9 +78,41 @@ pub async fn save_ip_asset(asset: IpAsset) -> Result<IpAsset, CommandError> {
 
 #[tauri::command]
 pub async fn delete_ip_asset(id: String) -> Result<bool, CommandError> {
-    let uuid = Uuid::parse_str(&id)?;
-    database::delete_ip_asset(uuid).await?;
-    Ok(true)
+    tracing::info!("Attempting to delete IP asset with ID: {}", id);
+    
+    // Parse and validate UUID
+    let uuid = match Uuid::parse_str(&id) {
+        Ok(uuid) => {
+            tracing::info!("Successfully parsed UUID: {}", uuid);
+            uuid
+        },
+        Err(e) => {
+            tracing::error!("Failed to parse UUID '{}': {}", id, e);
+            return Err(CommandError::Uuid(format!("Invalid UUID format '{}': {}", id, e)));
+        }
+    };
+    
+    // Perform database deletion (now handles related cases automatically)
+    match database::delete_ip_asset(uuid).await {
+        Ok(deleted) => {
+            if deleted {
+                tracing::info!("Successfully deleted IP asset with ID: {} (including any related cases)", id);
+                Ok(true)
+            } else {
+                tracing::warn!("No IP asset found with ID: {}", id);
+                Err(CommandError::Database(format!("IP asset with ID '{}' not found", id)))
+            }
+        },
+        Err(e) => {
+            tracing::error!("Database error while deleting IP asset '{}': {}", id, e);
+            let error_msg = if e.to_string().contains("FOREIGN KEY constraint failed") {
+                format!("无法删除IP资产 '{}': 存在相关的案件记录。请先删除相关案件或联系管理员。", id)
+            } else {
+                format!("删除IP资产 '{}' 失败: {}", id, e)
+            };
+            Err(CommandError::Database(error_msg))
+        }
+    }
 }
 
 // 案件相关命令

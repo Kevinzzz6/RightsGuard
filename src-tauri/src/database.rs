@@ -583,12 +583,32 @@ pub async fn save_ip_asset(asset: &IpAsset) -> Result<IpAsset> {
 
 pub async fn delete_ip_asset(id: Uuid) -> Result<bool> {
     let pool = get_pool().await?;
+    
+    // Start a transaction to ensure both operations succeed or fail together
+    let mut tx = pool.begin().await?;
+    
+    // First, delete any cases that reference this IP asset
+    let cases_deleted = sqlx::query(
+        "DELETE FROM cases WHERE associated_ip_id = ?1"
+    )
+    .bind(id.to_string())
+    .execute(&mut *tx)
+    .await?;
+    
+    if cases_deleted.rows_affected() > 0 {
+        tracing::info!("Deleted {} related case(s) for IP asset {}", cases_deleted.rows_affected(), id);
+    }
+    
+    // Then delete the IP asset itself
     let result = sqlx::query(
         "DELETE FROM ip_assets WHERE id = ?1"
     )
     .bind(id.to_string())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+    
+    // Commit the transaction
+    tx.commit().await?;
     
     Ok(result.rows_affected() > 0)
 }

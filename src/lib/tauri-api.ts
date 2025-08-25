@@ -455,11 +455,26 @@ class TauriAPI {
     }
     
     try {
+      console.log('[TauriAPI] Attempting to delete IP asset with ID:', id);
+      console.log('[TauriAPI] ID type:', typeof id, 'Length:', id?.length);
+      
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<boolean>('delete_ip_asset', { id });
+      const result = await invoke<boolean>('delete_ip_asset', { id });
+      
+      console.log('[TauriAPI] Delete operation result:', result);
+      return result;
     } catch (error) {
-      console.error('Failed to delete IP asset:', error);
-      return false;
+      console.error('[TauriAPI] Failed to delete IP asset:', id);
+      console.error('[TauriAPI] Error details:', error);
+      
+      // 尝试提取更详细的错误信息
+      if (error && typeof error === 'object') {
+        console.error('[TauriAPI] Error object keys:', Object.keys(error));
+        console.error('[TauriAPI] Stringified error:', JSON.stringify(error, null, 2));
+      }
+      
+      // 重新抛出错误而不是静默返回false，让调用者处理
+      throw new Error(`删除IP资产失败: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
     }
   }
 
