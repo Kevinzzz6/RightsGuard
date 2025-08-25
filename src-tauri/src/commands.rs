@@ -267,6 +267,28 @@ pub async fn show_message(title: String, message: String, app: tauri::AppHandle)
     Ok(())
 }
 
+#[tauri::command]
+pub async fn show_confirm_dialog(title: String, message: String, app: tauri::AppHandle) -> Result<bool, CommandError> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind, MessageDialogButtons};
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancel)
+        .show(move |response| {
+            let _ = tx.send(response);
+        });
+    
+    match rx.recv() {
+        Ok(response) => Ok(response),
+        Err(_) => Ok(false), // Default to false if channel fails
+    }
+}
+
 // Helper function to test file system operations
 async fn test_file_system_operations() -> Result<Vec<String>, anyhow::Error> {
     let mut results = Vec::new();

@@ -119,6 +119,7 @@ fn main() {
             // 系统相关命令
             open_url,
             show_message,
+            show_confirm_dialog,
             
             // 调试命令
             test_database,

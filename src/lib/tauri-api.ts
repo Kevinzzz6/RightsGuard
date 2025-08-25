@@ -721,6 +721,22 @@ class TauriAPI {
     }
   }
 
+  async showConfirmDialog(title: string, message: string): Promise<boolean> {
+    if (!this.isTauri) {
+      // Mock confirm for web environment
+      return window.confirm(`${title}\n\n${message}`);
+    }
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<boolean>('show_confirm_dialog', { title, message });
+    } catch (error) {
+      console.error('Failed to show confirm dialog:', error);
+      // Fallback to false for safety
+      return false;
+    }
+  }
+
   // Database testing API
   async testDatabase(): Promise<{ success: boolean; message: string }> {
     console.log('[TauriAPI] testDatabase called, isTauri:', this.isTauri);

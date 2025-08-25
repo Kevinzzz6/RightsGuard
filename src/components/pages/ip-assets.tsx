@@ -156,7 +156,12 @@ export function IpAssetsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("确定要删除这个IP资产吗？\n\n⚠️ 注意：如果存在相关的案件记录，它们也会被一并删除。")) {
+    const confirmDelete = await tauriAPI.showConfirmDialog(
+      "确认删除", 
+      "确定要删除这个IP资产吗？\n\n⚠️ 注意：如果存在相关的案件记录，它们也会被一并删除。"
+    );
+    
+    if (confirmDelete) {
         try {
             console.log('[IP Assets] Attempting to delete asset with ID:', id);
             const result = await tauriAPI.deleteIpAsset(id);
