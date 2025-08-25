@@ -321,6 +321,62 @@ fn generate_connect_script(
             
             // 🔍 第一步：详细DOM结构分析 - 专门针对版权图片上传区域
             console.log('🔍 开始版权图片上传区域DOM结构深度分析...');
+            console.log('🎯 DEBUG: 检查修复后的策略是否生效 - 这是新增的调试信息');
+            
+            // 🔍 关键诊断：检查所有可能的文件输入元素
+            console.log('🔍 开始全面文件输入元素检测...');
+            try {{
+                // 检查.el-upload__input元素
+                const elUploadInputCount = await page.locator('.el-upload__input').count();
+                console.log(`📊 .el-upload__input 元素数量: ${{elUploadInputCount}}`);
+                
+                if (elUploadInputCount > 0) {{
+                    for (let i = 0; i < elUploadInputCount; i++) {{
+                        const element = page.locator('.el-upload__input').nth(i);
+                        const isVisible = await element.isVisible();
+                        const isEnabled = await element.isEnabled();
+                        const attributes = await element.evaluate(el => {{
+                            return {{
+                                id: el.id,
+                                className: el.className,
+                                name: el.name,
+                                type: el.type,
+                                accept: el.accept,
+                                multiple: el.multiple,
+                                style: el.style.cssText
+                            }};
+                        }});
+                        console.log(`📄 .el-upload__input[${{i}}]: visible=${{isVisible}}, enabled=${{isEnabled}}`);
+                        console.log(`📄 属性:`, JSON.stringify(attributes, null, 2));
+                    }}
+                }}
+                
+                // 检查所有input[type=\"file\"]元素
+                const allFileInputs = await page.locator('input[type=\"file\"]').count();
+                console.log(`📊 所有 input[type=\"file\"] 数量: ${{allFileInputs}}`);
+                
+                if (allFileInputs > 0) {{
+                    for (let i = 0; i < Math.min(allFileInputs, 3); i++) {{ // 限制检查前3个
+                        const element = page.locator('input[type=\"file\"]').nth(i);
+                        const isVisible = await element.isVisible();
+                        const isEnabled = await element.isEnabled();
+                        const selector = await element.evaluate(el => {{
+                            // 生成元素的唯一选择器
+                            const classes = el.className ? '.' + el.className.split(' ').join('.') : '';
+                            const id = el.id ? '#' + el.id : '';
+                            return `input[type=\"file\"]${{id}}${{classes}}`;
+                        }});
+                        console.log(`📄 FileInput[${{i}}]: visible=${{isVisible}}, enabled=${{isEnabled}}, selector: ${{selector}}`);
+                    }}
+                }}
+                
+                // 检查.el-upload元素
+                const elUploadCount = await page.locator('.el-upload').count();
+                console.log(`📊 .el-upload 元素数量: ${{elUploadCount}}`);
+                
+            }} catch (domAnalysisError) {{
+                console.error('❌ 文件输入元素检测失败:', domAnalysisError.message);
+            }}
             
             try {{
                 // 直接定位版权图片上传区域
@@ -383,17 +439,19 @@ fn generate_connect_script(
             
             // 🎯 优化策略顺序 - 优先使用不依赖文件选择器的方法
             const selectorStrategies = [
-                // 策略1: 隐藏文件输入直接设置 - 最可靠，不检查可见性
+                // 策略1: Element UI组件直接API调用 - 最专业的方法
+                {{ selector: '.el-upload', type: 'element_ui_api', name: 'Element UI组件API直接调用' }},
+                // 策略2: 隐藏文件输入直接设置 - 最可靠，不检查可见性
                 {{ selector: '.el-upload__input', type: 'hidden_input', name: '隐藏文件输入直接设置' }},
-                // 策略2: 通用文件输入直接设置 - 需要检查可见性
+                // 策略3: 通用文件输入直接设置 - 需要检查可见性
                 {{ selector: 'input[type=\"file\"]', type: 'visible_input', name: '通用文件输入直接设置' }},
-                // 策略3: FileChooser API方法 - 如果支持的话，程序化设置
+                // 策略4: FileChooser API方法 - 如果支持的话，程序化设置
                 {{ selector: '.el-upload', type: 'chooser', name: 'FileChooser API设置' }},
-                // 策略4: 用户验证方法作为最后备用 - 可能打开选择界面
+                // 策略5: 用户验证方法作为最后备用 - 可能打开选择界面
                 {{ selector: '.el-upload', type: 'fallback', name: '点击后直接设置（备用）' }}
             ];
             
-            console.log('🔍 开始4级智能选择器检测（隐藏输入优先，避免文件选择器依赖）...');
+            console.log('🔍 开始5级智能选择器检测（Element UI API优先，避免文件选择器依赖）...');
             
             // 🔍 增强文件验证和错误处理
             console.log('📁 开始全面文件验证...');
@@ -490,10 +548,142 @@ fn generate_connect_script(
             
             for (let i = 0; i < selectorStrategies.length && !uploadSuccess; i++) {{
                 const strategy = selectorStrategies[i];
-                console.log(`🎯 尝试策略${{i+1}}: ${{strategy.name}} (${{strategy.selector}})`);
+                console.log(`\\n🎯 尝试策略${{i+1}}: ${{strategy.name}} (${{strategy.selector}})`);
+                console.log(`🔍 策略类型: ${{strategy.type}} - 这将决定执行路径`);
                 
                 try {{
-                    if (strategy.type === 'chooser') {{
+                    if (strategy.type === 'element_ui_api') {{
+                        // Element UI组件API直接调用策略 - 最专业的方法
+                        console.log(`🎯 使用Element UI组件API直接调用方法`);
+                        const uploadComponents = page.locator(strategy.selector);
+                        const componentCount = await uploadComponents.count();
+                        console.log(`   Element UI上传组件数量: ${{componentCount}}`);
+                        
+                        if (componentCount > 0) {{
+                            console.log(`🔍 尝试直接调用Element UI Upload组件方法...`);
+                            
+                            // 尝试每个Upload组件
+                            for (let j = 0; j < componentCount; j++) {{
+                                const component = uploadComponents.nth(j);
+                                console.log(`🔍 处理第${{j+1}}个Upload组件...`);
+                                
+                                try {{
+                                    const apiCallResult = await component.evaluate((el, files) => {{
+                                        console.log('📡 开始Element UI API调用...');
+                                        
+                                        // 查找Vue实例
+                                        let vueInstance = el.__vue__ || el._vueParentComponent;
+                                        if (!vueInstance && el.__vueParentComponent) {{
+                                            vueInstance = el.__vueParentComponent.ctx;
+                                        }}
+                                        
+                                        if (vueInstance) {{
+                                            console.log('📡 找到Vue实例，组件类型:', vueInstance.$options.name || 'Unknown');
+                                            
+                                            // 创建模拟的File对象
+                                            const mockFiles = [];
+                                            for (const filePath of files) {{
+                                                const fileName = filePath.split(/[/\\\\]/).pop();
+                                                const mockFile = new File(['mock content'], fileName, {{
+                                                    type: 'image/png',
+                                                    lastModified: Date.now()
+                                                }});
+                                                // 添加路径信息以便后续处理
+                                                Object.defineProperty(mockFile, 'path', {{
+                                                    value: filePath,
+                                                    writable: false
+                                                }});
+                                                mockFiles.push(mockFile);
+                                            }}
+                                            
+                                            // 尝试不同的Element UI Upload方法
+                                            const methods = [
+                                                'uploadFiles',
+                                                'handleStart', 
+                                                'handleFiles',
+                                                'onStart',
+                                                'handleChange',
+                                                'clearFiles'
+                                            ];
+                                            
+                                            let successMethod = null;
+                                            for (const method of methods) {{
+                                                if (typeof vueInstance[method] === 'function') {{
+                                                    console.log(`📡 找到方法: ${{method}}`);
+                                                    try {{
+                                                        if (method === 'handleFiles' || method === 'uploadFiles') {{
+                                                            vueInstance[method](mockFiles);
+                                                        }} else if (method === 'handleStart' || method === 'onStart') {{
+                                                            mockFiles.forEach(file => vueInstance[method](file));
+                                                        }} else if (method === 'handleChange') {{
+                                                            vueInstance[method]({{ target: {{ files: mockFiles }} }});
+                                                        }}
+                                                        successMethod = method;
+                                                        console.log(`✅ 成功调用方法: ${{method}}`);
+                                                        break;
+                                                    }} catch (methodError) {{
+                                                        console.log(`❌ 方法${{method}}调用失败:`, methodError.message);
+                                                    }}
+                                                }}
+                                            }}
+                                            
+                                            // 触发Vue的响应式更新
+                                            if (vueInstance.$forceUpdate) {{
+                                                vueInstance.$forceUpdate();
+                                            }}
+                                            
+                                            return {{ success: !!successMethod, method: successMethod, componentName: vueInstance.$options.name }};
+                                        }} else {{
+                                            console.log('❌ 未找到Vue实例');
+                                            return {{ success: false, error: 'No Vue instance found' }};
+                                        }}
+                                    }}, finalFiles);
+                                    
+                                    console.log(`📊 API调用结果:`, JSON.stringify(apiCallResult, null, 2));
+                                    
+                                    if (apiCallResult.success) {{
+                                        console.log(`🎉 Element UI API调用成功！使用方法: ${{apiCallResult.method}}`);
+                                        
+                                        // 等待处理完成
+                                        await page.waitForTimeout(3000);
+                                        
+                                        // 验证上传成功
+                                        const uploadItemsVariants = [
+                                            '.copyright-img-upload .el-upload-list__item',
+                                            '.el-upload-list--picture-card .el-upload-list__item', 
+                                            '.el-upload-list__item',
+                                            '[class*=\"upload-list\"] [class*=\"item\"]',
+                                            '.el-upload-list .el-upload-list__item'
+                                        ];
+                                        
+                                        let totalUploadItems = 0;
+                                        for (const variant of uploadItemsVariants) {{
+                                            const count = await page.locator(variant).count();
+                                            if (count > 0) {{
+                                                console.log(`📊 找到${{count}}个上传项目 (选择器: ${{variant}})`);
+                                                totalUploadItems = Math.max(totalUploadItems, count);
+                                            }}
+                                        }}
+                                        
+                                        if (totalUploadItems > 0) {{
+                                            uploadSuccess = true;
+                                            console.log(`🎉 Element UI API上传成功，使用策略${{i+1}}: ${{strategy.name}}`);
+                                            break; // 退出组件循环
+                                        }}
+                                    }}
+                                    
+                                }} catch (componentError) {{
+                                    console.log(`❌ 第${{j+1}}个组件处理失败: ${{componentError.message}}`);
+                                }}
+                            }}
+                            
+                            if (uploadSuccess) {{
+                                console.log(`🛑 Element UI API上传成功，停止其他策略尝试`);
+                                break; // 立即退出策略循环
+                            }}
+                        }}
+                        
+                    }} else if (strategy.type === 'chooser') {{
                         // File Chooser API策略 - 增强版本，处理文件选择界面
                         console.log(`🎯 使用FileChooser API方法`);
                         const trigger = page.locator(strategy.selector).first();
@@ -575,6 +765,7 @@ fn generate_connect_script(
                     }} else if (strategy.type === 'hidden_input') {{
                         // 隐藏文件输入策略 - 不检查可见性，直接设置文件
                         console.log(`🎯 使用隐藏输入策略，跳过可见性检查`);
+                        console.log(`🔍 正在搜索选择器: ${{strategy.selector}}`);
                         const element = page.locator(strategy.selector).first();
                         
                         try {{
@@ -583,16 +774,97 @@ fn generate_connect_script(
                             console.log(`   隐藏输入元素数量: ${{elementCount}}`);
                             
                             if (elementCount > 0) {{
+                                // 🔍 详细的元素状态检查
+                                console.log(`🔍 检查隐藏输入元素详细信息...`);
+                                const elementInfo = await element.evaluate(el => {{
+                                    return {{
+                                        tagName: el.tagName,
+                                        type: el.type,
+                                        className: el.className,
+                                        id: el.id,
+                                        name: el.name,
+                                        accept: el.accept,
+                                        multiple: el.multiple,
+                                        disabled: el.disabled,
+                                        readOnly: el.readOnly,
+                                        style: {{
+                                            display: el.style.display,
+                                            visibility: el.style.visibility,
+                                            opacity: el.style.opacity
+                                        }},
+                                        offsetParent: el.offsetParent !== null,
+                                        files: el.files ? el.files.length : 0
+                                    }};
+                                }});
+                                console.log(`📊 元素信息:`, JSON.stringify(elementInfo, null, 2));
+                                
                                 console.log(`📁 直接设置文件到隐藏输入元素，无需检查可见性`);
+                                console.log(`🎯 设置前文件数量: ${{elementInfo.files}}`);
+                                console.log(`🎯 将要设置的文件: [${{finalFiles.join(', ')}}]`);
+                                
                                 await element.setInputFiles(finalFiles);
+                                console.log(`✅ setInputFiles调用完成`);
+                                
+                                // 检查设置后的文件数量
+                                const afterFiles = await element.evaluate(el => el.files ? el.files.length : 0);
+                                console.log(`🎯 设置后文件数量: ${{afterFiles}}`);
+                                
+                                if (afterFiles !== finalFiles.length) {{
+                                    console.log(`⚠️ 警告: 期望设置${{finalFiles.length}}个文件，实际只设置了${{afterFiles}}个`);
+                                }}
                                 
                                 // 主动触发change事件确保页面响应
+                                console.log(`🔍 开始触发DOM事件和Element UI特殊处理...`);
                                 await element.evaluate((input, files) => {{
-                                    const changeEvent = new Event('change', {{ bubbles: true }});
-                                    const inputEvent = new Event('input', {{ bubbles: true }});
-                                    input.dispatchEvent(changeEvent);
+                                    console.log('📡 开始事件触发序列...');
+                                    
+                                    // 标准DOM事件
+                                    const changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
+                                    const inputEvent = new Event('input', {{ bubbles: true, cancelable: true }});
+                                    
+                                    // Element UI可能使用的自定义事件
+                                    const customChangeEvent = new CustomEvent('el.upload.change', {{ 
+                                        bubbles: true, 
+                                        detail: {{ files: input.files }} 
+                                    }});
+                                    
+                                    // 触发事件序列
                                     input.dispatchEvent(inputEvent);
-                                    console.log('✅ 已触发change和input事件');
+                                    input.dispatchEvent(changeEvent); 
+                                    input.dispatchEvent(customChangeEvent);
+                                    
+                                    // 尝试触发Element UI的文件处理
+                                    try {{
+                                        // 检查是否有Vue实例
+                                        const vueInstance = input.__vue__ || input._vueParentComponent;
+                                        if (vueInstance) {{
+                                            console.log('📡 发现Vue实例，尝试触发Vue方法');
+                                            // 可能的Element UI方法名
+                                            if (vueInstance.handleChange) {{
+                                                console.log('📡 调用handleChange方法');
+                                                vueInstance.handleChange({{ target: input }});
+                                            }}
+                                            if (vueInstance.$emit) {{
+                                                console.log('📡 触发Vue事件');
+                                                vueInstance.$emit('change', input.files);
+                                            }}
+                                        }}
+                                        
+                                        // 查找父级Element Upload组件
+                                        const uploadComponent = input.closest('.el-upload');
+                                        if (uploadComponent && uploadComponent.__vue__) {{
+                                            console.log('📡 发现Upload组件实例');
+                                            const uploadVue = uploadComponent.__vue__;
+                                            if (uploadVue.handleChange) {{
+                                                uploadVue.handleChange({{ target: input }});
+                                            }}
+                                        }}
+                                        
+                                    }} catch (vueError) {{
+                                        console.log('📡 Vue方法调用失败:', vueError.message);
+                                    }}
+                                    
+                                    console.log('✅ 已触发完整事件序列: input -> change -> custom -> vue');
                                 }}, finalFiles);
                                 
                                 console.log(`✅ 策略${{i+1}}文件设置完成: ${{strategy.name}}`);
@@ -770,7 +1042,7 @@ fn generate_connect_script(
             }}
             
             if (!uploadSuccess) {{
-                console.log('⚠️ 所有4种智能文件上传策略均未成功（隐藏输入→可见输入→FileChooser→备用方法）');
+                console.log('⚠️ 所有5种智能文件上传策略均未成功（Element UI API→隐藏输入→可见输入→FileChooser→备用方法）');
                 
                 // 🔍 增强调试信息 - DOM结构分析
                 console.log('🔍 开始页面DOM结构分析...');
