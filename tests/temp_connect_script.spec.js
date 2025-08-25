@@ -31,11 +31,11 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         console.log('🔥 关键阶段：身份证文件上传开始...');
         
         console.log('🆔 开始上传真实身份证文件（来自个人档案配置）...');
-        console.log('📁 身份证文件列表:', ["test_1756095658.png", "屏幕截图 2025-07-20 115009_1756095658.png"]);
+        console.log('📁 身份证文件列表:', ["test_1756104109.png", "屏幕截图 2025-07-20 115009_1756104109.png"]);
         console.log('🚦 文件上传模块启动 - 即将开始上传流程...');
         
         try {
-            const idCardFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\profiles\\id_cards\\test_1756095658.png", "C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\profiles\\id_cards\\屏幕截图 2025-07-20 115009_1756095658.png"];
+            const idCardFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\profiles\\id_cards\\test_1756104109.png", "C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\profiles\\id_cards\\屏幕截图 2025-07-20 115009_1756104109.png"];
             console.log('📊 文件数量:', idCardFiles.length, '，请确认包含身份证正反面');
             
             // ✅ 验证身份证文件完整性
@@ -831,7 +831,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
                     console.log(`   第一个元素: visible=${isVisible}, enabled=${isEnabled}`);
                     
                     if (isVisible && isEnabled) {
-                        await firstElement.fill("酷酷酷");
+                        await firstElement.fill("soyorin");
                         console.log(`✅ 权利人填写成功! 使用策略: ${strategy.name}`);
                         rightsHolderFilled = true;
                         
@@ -866,7 +866,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
             
             await page.locator('div').filter({ hasText: /^授权期限/ }).getByPlaceholder('结束时间').click();
             await page.waitForTimeout(500);
-            await page.keyboard.type("2025-08-21");
+            await page.keyboard.type("2025-08-27");
             await page.keyboard.press('Tab');
         }
         
@@ -892,7 +892,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
                 const element = page.locator(strategy.selector);
                 const count = await element.count();
                 if (count > 0 && await element.first().isVisible({ timeout: 1000 })) {
-                    await element.first().fill("大大");
+                    await element.first().fill("猪猪侠");
                     console.log(`✅ 著作名称填写成功! 使用: ${strategy.name}`);
                     workNameFilled = true;
                 }
@@ -904,7 +904,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         if (!workNameFilled) {
             console.error('❌ 著作名称填写失败，尝试备用方法...');
             try {
-                await page.locator('div').filter({ hasText: /^著作名称/ }).getByRole('textbox').fill("大大");
+                await page.locator('div').filter({ hasText: /^著作名称/ }).getByRole('textbox').fill("猪猪侠");
                 console.log('✅ 著作名称填写成功 (备用方法)');
             } catch (backupError) {
                 console.error('❌ 著作名称备用方法也失败:', backupError.message);
@@ -967,16 +967,16 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         }
         
         // 填写期限 (作品有效期)
-        if (false && false) {
+        if (true && true) {
             console.log('⏰ 设置作品期限...');
             await page.locator('div').filter({ hasText: /^期限/ }).getByPlaceholder('起始时间').click();
             await page.waitForTimeout(500);
-            await page.keyboard.type("");
+            await page.keyboard.type("2025-08-12");
             await page.keyboard.press('Tab');
             
             await page.locator('div').filter({ hasText: /^期限/ }).getByPlaceholder('结束时间').click();
             await page.waitForTimeout(500);
-            await page.keyboard.type("");
+            await page.keyboard.type("2025-08-28");
             await page.keyboard.press('Tab');
         }
         
@@ -984,7 +984,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         
         console.log('📋 开始上传授权证明文件...');
         try {
-            const authFiles = ["C:\\Users\\kevin\\Pictures\\Screenshots\\屏幕截图 2025-07-20 120221.png", "C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\auth_docs\\test.png"];
+            const authFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\auth_docs\\test_1756103691.png"];
             console.log('📁 授权证明文件数量:', authFiles.length);
             
             // 使用更精确的选择器，基于用户录制的操作
@@ -1014,7 +1014,7 @@ test('Bilibili Appeal - Connect Mode with File Upload', async () => {
         
         console.log('🏆 开始上传作品证明文件...');
         try {
-            const workProofFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\proof_docs\\test.png"];
+            const workProofFiles = ["C:\\Users\\kevin\\AppData\\Roaming\\com.rightsguard.app\\files\\ip_assets\\proof_docs\\屏幕截图 2025-07-20 115009.png"];
             console.log('📁 作品证明文件数量:', workProofFiles.length);
             
             // 使用更精确的选择器，基于用户录制的操作
