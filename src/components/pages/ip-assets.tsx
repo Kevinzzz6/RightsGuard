@@ -325,6 +325,32 @@ export function IpAssetsPage() {
                     选择文件
                   </Button>
                 </div>
+                {/* 显示已上传的授权证明文件 */}
+                {formData.authFiles && formData.authFiles.length > 0 && (
+                  <div className="mt-2 p-3 bg-muted rounded-lg">
+                    <div className="text-sm font-medium mb-2">已上传文件 ({formData.authFiles.length}个)：</div>
+                    <div className="space-y-1">
+                      {formData.authFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground truncate" title={file}>
+                            📄 {typeof file === 'string' ? file.split('/').pop() || file : String(file)}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              const newFiles = formData.authFiles.filter((_, i) => i !== index);
+                              setFormData(prev => ({ ...prev, authFiles: newFiles }));
+                            }}
+                          >
+                            ×
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Equity Type */}
@@ -421,6 +447,32 @@ export function IpAssetsPage() {
                     选择文件
                   </Button>
                 </div>
+                {/* 显示已上传的作品证明文件 */}
+                {formData.workProofFiles && formData.workProofFiles.length > 0 && (
+                  <div className="mt-2 p-3 bg-muted rounded-lg">
+                    <div className="text-sm font-medium mb-2">已上传文件 ({formData.workProofFiles.length}个)：</div>
+                    <div className="space-y-1">
+                      {formData.workProofFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground truncate" title={file}>
+                            📄 {typeof file === 'string' ? file.split('/').pop() || file : String(file)}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              const newFiles = formData.workProofFiles.filter((_, i) => i !== index);
+                              setFormData(prev => ({ ...prev, workProofFiles: newFiles }));
+                            }}
+                          >
+                            ×
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2 pt-4">
